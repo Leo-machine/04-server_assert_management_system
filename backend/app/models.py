@@ -172,3 +172,61 @@ class MovementLog(Base):
 
     part: Mapped["Part"] = relationship(back_populates="movements")
     operator: Mapped["User"] = relationship(foreign_keys=[operator_id])
+
+
+class Stocktake(Base):
+    __tablename__ = "stocktake"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scope_kind: Mapped[str] = mapped_column(String(50), nullable=False)
+    scope_value: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    initiator_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
+    initiated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    items: Mapped[list["StocktakeItem"]] = relationship(
+        back_populates="stocktake", order_by="StocktakeItem.id"
+    )
+    initiator: Mapped["User"] = relationship(foreign_keys=[initiator_id])
+
+
+class StocktakeItem(Base):
+    __tablename__ = "stocktake_item"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stocktake_id: Mapped[int] = mapped_column(ForeignKey("stocktake.id"), nullable=False)
+    part_id: Mapped[Optional[int]] = mapped_column(ForeignKey("part.id"), nullable=True)
+    expected_loc_kind: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    expected_loc_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    result: Mapped[str] = mapped_column(String(50), nullable=False)
+    actual_loc_kind: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    actual_loc_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    scanned_asset_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    checker_id: Mapped[Optional[int]] = mapped_column(ForeignKey("user.id"), nullable=True)
+    checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    feedback_source: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    stocktake: Mapped["Stocktake"] = relationship(back_populates="items")
+    part: Mapped[Optional["Part"]] = relationship()
+    checker: Mapped[Optional["User"]] = relationship(foreign_keys=[checker_id])
+    discrepancy: Mapped[Optional["StocktakeDiscrepancy"]] = relationship(
+        back_populates="item", uselist=False
+    )
+
+
+class StocktakeDiscrepancy(Base):
+    __tablename__ = "stocktake_discrepancy"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stocktake_item_id: Mapped[int] = mapped_column(
+        ForeignKey("stocktake_item.id"), nullable=False, unique=True
+    )
+    discrepancy_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
+    reviewer_id: Mapped[Optional[int]] = mapped_column(ForeignKey("user.id"), nullable=True)
+    review_conclusion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    resolution: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    linked_ref: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    item: Mapped["StocktakeItem"] = relationship(back_populates="discrepancy")

@@ -41,3 +41,25 @@ STEP_REJECTED = "驳回"
 # 来源 / 责任组
 SOURCE_TYPES = ("随器采购", "单独合同", "维保换新")
 RESPONSIBLE_GROUPS = ("基础组", "运营组", "网络组", "平台组")
+
+# 盘点
+SCOPE_FULL = "全盘"
+SCOPE_KINDS = ("全盘", "按机房", "按责任组", "按配件类型", "指定清单")
+
+STOCKTAKE_IN_PROGRESS = "进行中"
+STOCKTAKE_COMPLETED = "已完成"
+STOCKTAKE_ARCHIVED = "已归档"
+
+RESULT_PENDING = "待复核"
+RESULT_MATCH = "相符"
+RESULT_SHORTAGE = "盘亏"
+RESULT_SURPLUS = "盘盈"
+RESULT_MISPLACE = "错位"
+
+DISC_SHORTAGE = "盘亏"
+DISC_SURPLUS = "盘盈"
+DISC_MISPLACE = "错位"
+
+DISC_STATUS_HOLD = "挂起追查"
+DISC_STATUS_REVIEW = "待复核"
+DISC_STATUS_RESOLVED = "已处置"

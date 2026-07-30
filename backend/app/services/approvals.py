@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -62,7 +62,7 @@ def create_loan_approval(
         part_id=part_id,
         action_type=enums.ACTION_LOAN,
         applicant_id=applicant_id,
-        applied_at=datetime.utcnow(),
+        applied_at=datetime.now(timezone.utc),
         overall_status=enums.APPROVAL_PENDING,
         current_level=1,
         expected_return_date=expected_return_date,
@@ -145,7 +145,7 @@ def decide_approval(
 
     step.step_status = enums.STEP_APPROVED if approve else enums.STEP_REJECTED
     step.opinion = opinion
-    step.decided_at = datetime.utcnow()
+    step.decided_at = datetime.now(timezone.utc)
 
     if not approve:
         approval.overall_status = enums.APPROVAL_REJECTED

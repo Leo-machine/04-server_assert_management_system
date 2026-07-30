@@ -1,6 +1,6 @@
 """种子数据：打开即可点通主线演示。"""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -99,7 +99,7 @@ def seed_if_empty(db: Session) -> None:
     db.flush()
 
     operator_id = users[0].id
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # 在库件（可用于装机 / 借出）
     stock_parts = [

@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -46,7 +46,7 @@ def insert_movement(
         event_type=event_type,
         status_from=status_from,
         status_to=status_to,
-        occurred_at=occurred_at or datetime.utcnow(),
+        occurred_at=occurred_at or datetime.now(timezone.utc),
         operator_id=operator_id,
         loc_from_kind=loc_from_kind,
         loc_from_id=loc_from_id,

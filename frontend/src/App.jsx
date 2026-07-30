@@ -11,6 +11,9 @@ import ReturnPart from './pages/ReturnPart'
 import History from './pages/History'
 import Servers from './pages/Servers'
 
+import StocktakeList from './pages/StocktakeList'
+import StocktakeDetail from './pages/StocktakeDetail'
+
 export default function App() {
   const [users, setUsers] = useState([])
   const [operatorId, setOp] = useState(getOperatorId())
@@ -33,6 +36,7 @@ export default function App() {
           <NavLink to="/" end>配件</NavLink>
           <NavLink to="/inbound">入库</NavLink>
           <NavLink to="/approvals">审批</NavLink>
+          <NavLink to="/stocktakes">盘点</NavLink>
           <NavLink to="/servers">服务器</NavLink>
         </nav>
         <div className="operator">
@@ -56,6 +60,8 @@ export default function App() {
           <Route path="/parts/:id/return" element={<ReturnPart />} />
           <Route path="/parts/:id/history" element={<History />} />
           <Route path="/approvals" element={<Approvals />} />
+          <Route path="/stocktakes" element={<StocktakeList />} />
+          <Route path="/stocktakes/:id" element={<StocktakeDetail />} />
           <Route path="/servers" element={<Servers />} />
         </Routes>
       </main>

@@ -178,3 +178,82 @@ class ReplayOut(BaseModel):
     current_loc_kind: Optional[str] = None
     current_loc_id: Optional[int] = None
     matches_cache: bool
+
+
+# ----- 盘点 -----
+class StocktakeCreateIn(BaseModel):
+    scope_kind: str = "全盘"
+    scope_value: Optional[dict] = None
+
+
+class StocktakeCheckIn(BaseModel):
+    scanned_asset_no: Optional[str] = None
+    item_id: Optional[int] = None
+    actual_loc_kind: Optional[str] = None
+    actual_loc_id: Optional[int] = None
+    missing: bool = False
+
+
+class StocktakeConfirmExternalIn(BaseModel):
+    item_id: int
+    present: bool
+    feedback_source: str
+
+
+class StocktakeDiscrepancyOut(BaseModel):
+    id: int
+    stocktake_item_id: int
+    discrepancy_type: str
+    status: str
+    reviewer_id: Optional[int] = None
+    review_conclusion: Optional[str] = None
+    resolution: Optional[str] = None
+    linked_ref: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class StocktakeItemOut(BaseModel):
+    id: int
+    stocktake_id: int
+    part_id: Optional[int] = None
+    expected_loc_kind: Optional[str] = None
+    expected_loc_id: Optional[int] = None
+    expected_status_derived: Optional[str] = None  # 仅展示
+    result: str
+    actual_loc_kind: Optional[str] = None
+    actual_loc_id: Optional[int] = None
+    scanned_asset_no: Optional[str] = None
+    checker_id: Optional[int] = None
+    checked_at: Optional[datetime] = None
+    feedback_source: Optional[str] = None
+    requires_external_confirm: bool = False
+    fixed_asset_no: Optional[str] = None
+    discrepancy: Optional[StocktakeDiscrepancyOut] = None
+
+    model_config = {"from_attributes": True}
+
+
+class StocktakeOut(BaseModel):
+    id: int
+    scope_kind: str
+    scope_value: Optional[dict] = None
+    initiator_id: int
+    initiated_at: datetime
+    snapshot_at: datetime
+    status: str
+    summary: dict = {}
+    items: list[StocktakeItemOut] = []
+
+    model_config = {"from_attributes": True}
+
+
+class StocktakeListOut(BaseModel):
+    id: int
+    scope_kind: str
+    initiator_id: int
+    initiated_at: datetime
+    snapshot_at: datetime
+    status: str
+
+    model_config = {"from_attributes": True}
