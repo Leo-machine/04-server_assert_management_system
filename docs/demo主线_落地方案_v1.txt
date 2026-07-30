@@ -1,0 +1,350 @@
+服务器配件资产管理系统 — Demo 主线落地方案 v1
+（供审阅；批准后再写代码）
+================================================================================
+
+一、前提确认（已与你对齐）
+--------------------------------------------------------------------------------
+1. 「在途」demo 跳过：借出、归还各写一条原子履历，status_to 直接落「借出」「在库」。
+2. 预期归还日：创建审批单时必填进 approval；审批通过写借出履历时再冗余一份进履历。
+   「是否超期」页面只读判断（当前日期 > 预期归还日 且 配件仍为「借出」），不做定时任务。
+3. responsible_group / source_type：枚举字符串种子，不对接组织架构。
+4. 退役处置清单本轮不做；但 server.run_status 三值（未投运/投运/退役）留全。
+   种子至少一台投运、一台未投运；不提供退役 API。
+5. 项目结构：backend/ + frontend/。
+6. 设计文档拷入仓库：docs/配件资产管理系统_设计文档_v1.md。
+
+主线：入库 → 装机 → 拆下 → 借出（三级审批）→ 归还 + 查看完整履历。
+
+
+二、仓库起步动作（批准后第一步）
+--------------------------------------------------------------------------------
+- 将 Downloads 下《配件资产管理系统_设计文档_v1.md》拷到
+  docs/配件资产管理系统_设计文档_v1.md
+- 从零建立 backend/（FastAPI + SQLAlchemy ORM + SQLite）
+  与 frontend/（React + Vite）
+- 必须用 ORM，禁止写 SQLite 专有 SQL，便于日后换 PostgreSQL 只改连接配置
+
+
+三、ORM 模型（字段）
+--------------------------------------------------------------------------------
+枚举一律用字符串列存中文值（与设计文档一致），应用层校验合法取值。
+
+--- User ---
+id                PK
+name              str          显示名
+role_label        str, 可选    如「运维」「组长」，仅展示用
+
+--- PartModel ---
+id                PK
+category          str          内存 / GPU卡 / 光模块 …
+model_name        str
+brand             str, 可选
+pn                str, 可选
+spec              JSON, 可选   自由 JSON，不做分类型 Pydantic 校验
+
+--- Part ---
+id                PK
+model_id          FK → part_model
+fixed_asset_no    str, unique  固定资产编号
+serial_no         str, 可选
+source_type       str          随器采购 / 单独合同 / 维保换新
+contract_no       str, 可选
+purchase_amount   Numeric, 可选
+purchase_date     Date, 可选
+responsible_group str          基础组 / 运营组 / 网络组 / 平台组
+sensitivity       str, 可选
+current_status    str          投影缓存（真相在履历）
+current_loc_kind  str, 可选    库位 / 服务器 / 外单位 / 无
+current_loc_id    int, 可选
+
+--- Server ---
+id                PK
+asset_no          str
+model             str, 可选
+serial_no         str, 可选
+room              str, 可选
+rack              str, 可选
+u_position        str, 可选
+responsible_group str, 可选
+run_status        str          未投运 / 投运 / 退役（三值留全；无退役 API）
+
+--- StorageLocation ---
+id                PK
+warehouse         str
+slot              str
+
+--- PartServerLink ---
+id                PK
+part_id           FK → part
+server_id         FK → server
+slot              str, 可选
+说明：仅表示当前安装关系；装机 INSERT，拆下 DELETE；历史靠 movement_log
+
+--- ExternalOrg ---
+id                PK
+org_name          str
+contact           str, 可选
+contact_info      str, 可选
+
+--- Approval ---
+id                    PK
+part_id               FK → part
+action_type           str          demo 仅「借出」
+applicant_id          FK → user
+applied_at            datetime
+overall_status        str          审批中 / 通过 / 驳回 / 撤回
+current_level         int          1 / 2 / 3
+expected_return_date  Date         【创建时必填】借出预期归还日
+dest_org_id           FK → external_org
+remark                str, 可选
+
+--- ApprovalStep ---
+id                PK
+approval_id       FK → approval
+level             int          1 / 2 / 3
+approver_id       FK → user
+step_status       str          待审 / 通过 / 驳回
+opinion           str, 可选
+decided_at        datetime, 可选
+说明：创建时三级各一行；仅当前 current_level 对应级可决策；
+      非当前级禁止操作（实现上校验 level == approval.current_level）
+
+--- MovementLog（append-only）---
+id                    PK
+part_id               FK → part
+event_type            str          入库 / 装机 / 拆下 / 借出 / 归还
+status_from           str
+status_to             str
+occurred_at           datetime
+operator_id           FK → user
+loc_from_kind         str, 可选    库位 / 服务器 / 外单位 / 无
+loc_from_id           int, 可选
+loc_to_kind           str, 可选
+loc_to_id             int, 可选
+work_order_no         str, 可选
+approval_id           FK → approval, 可选   借出必填
+expected_return_date  Date, 可选           借出履历冗余一份（履历独立自证）
+remark                str, 可选
+
+代码约束：
+- MovementLog 不提供 update / delete 的 repository / service 方法
+- 服务层只暴露 insert + list_by_part
+- 位置多态（loc_*_kind + loc_*_id）一致性由应用层校验
+
+
+四、API 端点列表
+--------------------------------------------------------------------------------
+前缀建议 /api。当前操作人用请求头 X-Operator-Id（demo 无登录）。
+
+【只读 / 基础】
+GET    /users
+GET    /part-models
+GET    /parts                         含投影状态；借出件附 is_overdue 只读
+GET    /parts/{id}                    详情；可选附履历重放一致性字段
+GET    /parts/{id}/movements          完整履历
+GET    /servers
+PATCH  /servers/{id}/run-status       仅允许 未投运 ⇄ 投运（不可设为退役）
+GET    /storage-locations
+GET    /external-orgs
+
+【主线动作】
+POST   /parts/inbound                 新建 part + 写入库履历；status_to=在库；loc=库位
+POST   /parts/{id}/install            在库→装机；写装机履历；建 part_server_link
+POST   /parts/{id}/uninstall          服务器→库位；投运则 400；写拆下履历；删 link
+POST   /approvals/loan                发起借出审批：
+                                      - expected_return_date 必填（创建时就拦）
+                                      - 目的地外单位；配件当前必须「在库」
+                                      - 若已有「审批中」借出单则拒绝
+                                      - 三级审批人；回避校验（申请人不在审批人中，三级互异）
+GET    /approvals
+GET    /approvals/{id}                含 steps
+POST   /approvals/{id}/decide         body: level, approve/reject, opinion
+                                      校验：操作人==该级 approver_id；
+                                      level==current_level；逐级 / 一票否决；
+                                      末级通过前重校验 part 仍「在库」，否则作废；
+                                      三级全通过才写借出履历并更新 part 投影（同事务）
+POST   /parts/{id}/return             守卫：当前必须「借出」；
+                                      借出→在库；写归还履历；选回库库位（收货确认）
+
+【测试辅助】
+GET    /parts/{id}/projected-from-log 纯由履历重放当前状态，供测试断言
+
+
+五、前端页面列表
+--------------------------------------------------------------------------------
+布局壳              顶栏切换当前操作人（localStorage → 请求头 X-Operator-Id）
+/                   配件列表：状态/位置、超期标记、跳转操作与履历
+/inbound            入库表单
+/parts/:id/install  装机：选服务器 + 槽位
+/parts/:id/uninstall 拆下：选目标库位；投运报错明确展示
+/parts/:id/loan     发起借出：外单位、预期归还日、三级审批人（排除自己）
+/approvals          审批中心：待我审 / 全部；通过或驳回
+/parts/:id/return   归还：选回库库位
+/parts/:id/history  完整履历流水
+/servers            轻量页：看 run_status；切换未投运/投运
+
+样式从简即可。
+
+
+六、不变量 → 保障逻辑映射
+--------------------------------------------------------------------------------
+（仅列本轮相关；盘点/报废/调拨/换新等范围外不实现）
+
+1. movement_log append-only
+   → MovementLogRepository 仅 add()；无 update/delete API；
+     测试断言不存在写删历史记录的代码路径
+
+2. part.current_status / current_loc_* 为投影，须能由履历重放得出
+   → 每次写履历后同步更新 part 缓存；
+     提供 replay(part_id)；测试：操作后 part.current_* == replay()
+
+3. 配件运行状态派生自所在服务器，不存、不级联刷值
+   → 不存配件运行字段；需要时读 link → server.run_status
+
+4. 投运锁拆
+   → uninstall 服务：查 link→server，run_status==投运 → 拒绝；
+     测试：投运拒绝，切未投运后允许
+
+5. 退役强制逐件处置清单
+   → 本轮不实现（字段留「退役」，无退役 API）
+
+6–7 / 9 / 12–15（报废/调拨/换新/盘点相关）
+   → 本次不做
+
+7′. 目的地为外单位的借出必须有已通过审批单
+   → 借出履历只在 decide 全通过分支写入；无独立「直接借出」API
+
+8. 借出必须有预期归还日
+   → POST /approvals/loan 创建时校验必填；
+     通过写履历时再拷贝 expected_return_date 到 movement_log
+
+8′. 超期可查询（告警本轮只读）
+   → is_overdue = (current_status==借出
+                   and today > 最新借出履历.expected_return_date)
+     单一来源：只取最新一条借出履历上冗余的 expected_return_date，不以 approval
+
+10. 审批三级逐级 + 一票否决 + 回避 + 操作人必须是指定审批人
+    → 创建时校验：申请人不在审批人中、三级审批人互不相同；
+      decide 校验 level==current_level；
+      decide 校验 X-Operator-Id == 该级 approval_step.approver_id；
+      驳回 → overall_status=驳回，流程结束；
+      通过 → 升 current_level 或终态「通过」
+
+11. 仅审批通过后才落配件状态变更履历；落履历前重校验仍在库；禁止多张开飞单
+    → 驳回分支不调 movement insert、不改 part 状态；
+      最后一级通过写借出履历前：part.current_status 必须仍为「在库」，否则作废审批并报错；
+      发起借出时若已有「审批中」借出单则拒绝
+
+D1. 状态机迁移守卫
+    → 装机←在库；拆下←在用；借出←在库；归还←借出；非法起始状态一律拒绝
+
+D2. 写履历与更新投影同一事务
+    → insert 履历 + update part 投影 + 建/删 part_server_link 包在同一 DB 事务
+
+
+七、必须覆盖的测试（pytest）
+--------------------------------------------------------------------------------
+1. 投运锁拆：run_status=投运 时拆下被拒绝；切到未投运后允许
+2. 借出需审批通过：审批未通过时，不得写入借出履历、配件状态不得变为「借出」
+3. 审批三级逐级 + 一票否决：
+   第 N 级通过后第 N+1 级才可审；任意一级驳回则整单驳回、配件状态不变
+4. 审批回避：申请人出现在审批人中、或三级审批人有重复 → 创建审批单被拒绝
+5. 借出必填预期归还日：缺失时创建审批被拒绝（早拦，不等到写履历）
+6. 履历 append-only：无修改/删除历史记录代码路径；当前状态可由履历重放
+7. 非指定审批人调 decide 被拒（操作人 ≠ 该级 approver_id）
+8. 审批期间配件被改动（如装机）后，最后一级通过不得强行写借出履历
+9. 非法起始状态拒绝（如对「借出」状态配件触发装机）
+
+
+八、种子数据
+--------------------------------------------------------------------------------
+- part_model × 3：内存、GPU 卡、光模块各一
+- storage_location × 2
+- external_org × 1
+- server × 2：一台投运（上挂至少 1 件在用）、一台未投运（可装可拆）
+- part 若干：分布在库位与服务器上
+- user × 4–5：供当前操作人切换与三级审批选人
+
+
+九、编码顺序（批准后严格执行）
+--------------------------------------------------------------------------------
+1. 拷设计文档进 docs/
+2. ORM 模型 + 建表
+3. 种子数据
+4. API（含核心规则）
+5. 核心规则测试
+6. 前端页面（点通主线）
+
+
+十、Demo 简化 → 未来收口说明
+--------------------------------------------------------------------------------
+【跳过「在途」】
+现状：借出/归还各一条，status_to 直达「借出」「在库」。
+收口：状态机加回 在库→在途→借出、借出→在途→在库。
+      把现 write_loan_movement / write_return_movement 拆成「启运」+「签收」两步；
+      event_type 可仍用借出/归还，或增「启运/到货」原子事件（需文档定稿）。
+      审批通过可先落「在途」，对方/库管确认后再落终态。
+
+【超期只读判断】
+现状：列表/详情计算 is_overdue。
+收口：抽同一判断到 services/overdue.py；
+      加 APScheduler/cron 调 scan_overdue_loans() 写通知或发邮件；
+      页面可复用同一判断函数，不必改履历模型。
+
+【无退役 API】
+现状：run_status 含退役枚举，不提供退役动作。
+收口：新增 POST /servers/{id}/decommission；
+      禁止级联报废；生成逐件处置清单只读资源；
+      每件再走拆下/报废审批等原有入口。
+
+【无登录】
+现状：X-Operator-Id 头。
+收口：换 JWT/会话后，operator/applicant 从 token 取；审批选人仍查 user 表。
+
+【spec 自由 JSON】
+现状：不做分类型校验。
+收口：按 category 挂 Pydantic 模型，入库/改型号时校验。
+
+
+十一、本次明确不做（镀金禁区）
+--------------------------------------------------------------------------------
+盘点、调拨、报废、换新/event_group、GPU 影像、
+spec 分类型 Pydantic 校验、借出超期定时告警、兼容性校验、权限体系、
+退役处置清单 API、「在途」中间态。
+
+
+十二、验收标准（回顾）
+--------------------------------------------------------------------------------
+浏览器依次点通：
+入库 → 装到「未投运」服务器 → 拆下
+（并验证「投运」服务器上的件拆不动）
+→ 发起借出并走完三级审批 → 归还
+→ 页面查看任一配件完整履历流水。
+
+================================================================================
+十三、审阅补丁（已批准，编码必须落实）
+--------------------------------------------------------------------------------
+一、decide 必须校验「当前操作人 == 该级指定审批人」
+   → 取 X-Operator-Id，必须等于该级 approval_step.approver_id，否则拒绝。
+   → 新增测试：非指定审批人调 decide 被拒。
+
+二、审批通过落履历前重校验 + 禁止多张开飞单
+   → (a) 最后一级通过、写借出履历前：重新确认 part.current_status == 在库；
+         否则作废该审批并明确报错。
+   → (b) 发起借出时，若该配件已有「审批中」的借出单，拒绝再建。
+   → 新增测试：配件在审批期间被改动后，审批完成不得强行写借出。
+
+三、每个动作状态机迁移守卫（合法起始状态）
+   → 装机：必须「在库」
+   → 拆下：必须「在用」（另加投运锁拆）
+   → 借出发起 / 落借出履历：必须「在库」
+   → 归还：必须「借出」
+   → 新增测试：非法起始状态被拒（如对「借出」件装机）。
+
+四、「写履历 + 更新 part 投影 + 建/删 link」同一事务
+   → 要么全成、要么全滚，落实不变量 2。
+
+is_overdue：统一以最新一条借出履历上的 expected_return_date 为准（不以 approval）。
+
+================================================================================
+文档结束。方案已通过（含十三节补丁），直接进入编码。
