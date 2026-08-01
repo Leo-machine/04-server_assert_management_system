@@ -35,6 +35,9 @@ export default function ReturnPart() {
 
   return (
     <div className="panel">
+      <button type="button" className="back-link" onClick={() => nav('/')}>
+        返回配件列表
+      </button>
       <h2>归还（收货确认）</h2>
       {part && (
         <p className="muted">

@@ -55,11 +55,12 @@ export default function StocktakeDetail() {
 
   return (
     <div className="panel">
+      <Link to="/stocktakes" className="back-link">返回盘点列表</Link>
       <h2>
         盘点单 #{st.id} <span className="badge">{st.status}</span>
       </h2>
       <p className="muted">
-        {st.scope_kind} · 快照 {st.snapshot_at} · <Link to="/stocktakes">返回列表</Link>
+        {st.scope_kind} · 快照 {st.snapshot_at}
       </p>
       {error && <div className="error">{error}</div>}
       {msg && <div className="ok-msg">{msg}</div>}

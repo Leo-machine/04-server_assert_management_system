@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 
 export default function History() {
   const { id } = useParams()
+  const nav = useNavigate()
   const [part, setPart] = useState(null)
   const [moves, setMoves] = useState([])
   const [replay, setReplay] = useState(null)
@@ -25,16 +26,18 @@ export default function History() {
 
   return (
     <div className="panel">
+      <button type="button" className="back-link" onClick={() => nav('/')}>
+        返回配件列表
+      </button>
       <h2>配件履历</h2>
       {part && (
         <p className="muted">
           {part.fixed_asset_no} · 缓存状态 {part.current_status} / {part.current_loc_kind}#
-          {part.current_loc_id}{' '}
-          <Link to="/">返回列表</Link>
+          {part.current_loc_id}
         </p>
       )}
       {replay && (
-        <p className={`muted ${replay.matches_cache ? '' : ''}`}>
+        <p className={replay.matches_cache ? 'muted' : 'error'}>
           履历重放：{replay.current_status} / {replay.current_loc_kind}#{replay.current_loc_id}
           {replay.matches_cache ? '（与缓存一致）' : '（与缓存不一致！）'}
         </p>

@@ -9,6 +9,8 @@ export default function Uninstall() {
   const [server, setServer] = useState(null)
   const [locs, setLocs] = useState([])
   const [locId, setLocId] = useState('')
+  const [damaged, setDamaged] = useState(false)
+  const [remark, setRemark] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -31,6 +33,8 @@ export default function Uninstall() {
     try {
       await api.post(`/parts/${id}/uninstall`, {
         storage_location_id: Number(locId),
+        damaged,
+        remark: remark || null,
       })
       nav('/')
     } catch (err) {
@@ -40,6 +44,9 @@ export default function Uninstall() {
 
   return (
     <div className="panel">
+      <button type="button" className="back-link" onClick={() => nav('/')}>
+        返回配件列表
+      </button>
       <h2>拆下</h2>
       {part && (
         <p className="muted">
@@ -64,6 +71,25 @@ export default function Uninstall() {
             ))}
           </select>
         </label>
+        <label className="inline">
+          <input
+            type="checkbox"
+            checked={damaged}
+            onChange={(e) => setDamaged(e.target.checked)}
+            style={{ width: 'auto' }}
+          />
+          坏件拆下（配件转入「损坏」，后续只能走报废审批）
+        </label>
+        {damaged && (
+          <label>
+            损坏情况说明
+            <input
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+              placeholder="如 点不亮 / 阵列卡报警"
+            />
+          </label>
+        )}
         <button type="submit">确认拆下</button>
       </form>
     </div>

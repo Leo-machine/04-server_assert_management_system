@@ -13,29 +13,44 @@ from .movement import (
     require_status,
 )
 
+# 各审批动作的发起/落履历规则（单一真相源）
+# allowed_status: 发起与末级落履历前都重校验的起始状态白名单
+# event_type / status_to / loc_to_kind: 末级通过后落履历的写法
+_ACTION_RULES = {
+    enums.ACTION_LOAN: {
+        "allowed_status": {enums.STATUS_IN_STOCK},
+        "event_type": enums.EVENT_LOAN,
+        "status_to": enums.STATUS_LOANED,
+        "loc_to_kind": enums.LOC_EXTERNAL,
+    },
+    enums.ACTION_TRANSFER: {
+        "allowed_status": {enums.STATUS_IN_STOCK},
+        "event_type": enums.EVENT_TRANSFER,
+        "status_to": enums.STATUS_TRANSFERRED,
+        "loc_to_kind": enums.LOC_EXTERNAL,
+    },
+    enums.ACTION_SCRAP: {
+        "allowed_status": {enums.STATUS_IN_STOCK, enums.STATUS_DAMAGED},
+        "event_type": enums.EVENT_SCRAP,
+        "status_to": enums.STATUS_SCRAPPED,
+        "loc_to_kind": enums.LOC_NONE,
+    },
+}
 
-def _get_inflight_loan(db: Session, part_id: int) -> Optional[Approval]:
+
+def _get_inflight_approval(db: Session, part_id: int) -> Optional[Approval]:
+    """同一配件任意类型的「审批中」单（不限 action_type）。"""
     return db.scalars(
         select(Approval).where(
             Approval.part_id == part_id,
-            Approval.action_type == enums.ACTION_LOAN,
             Approval.overall_status == enums.APPROVAL_PENDING,
         )
     ).first()
 
 
-def create_loan_approval(
-    db: Session,
-    *,
-    part_id: int,
-    applicant_id: int,
-    dest_org_id: int,
-    expected_return_date: date,
-    approver_ids: list[int],
-    remark: Optional[str] = None,
-) -> Approval:
-    if expected_return_date is None:
-        raise BusinessError("借出必须填写预期归还日")
+def _validate_people(
+    db: Session, *, applicant_id: int, approver_ids: list[int]
+) -> None:
     if len(approver_ids) != 3:
         raise BusinessError("必须指定恰好三级审批人")
     if len(set(approver_ids)) != 3:
@@ -43,30 +58,59 @@ def create_loan_approval(
     if applicant_id in approver_ids:
         raise BusinessError("审批回避：申请人不得出现在任何一级审批人中")
 
+    # 批量校验用户存在性，避免 N 次单独查询
+    all_uids = [applicant_id, *approver_ids]
+    existing_uids = set(
+        db.scalars(select(User.id).where(User.id.in_(all_uids))).all()
+    )
+    missing = [uid for uid in all_uids if uid not in existing_uids]
+    if missing:
+        raise BusinessError(f"用户不存在: {missing}")
+
+
+def _require_dest_org(db: Session, dest_org_id: Optional[int]) -> None:
+    if dest_org_id is None:
+        raise BusinessError("必须指定外单位")
+    if db.get(ExternalOrg, dest_org_id) is None:
+        raise BusinessError("外单位不存在")
+
+
+def _create_approval(
+    db: Session,
+    *,
+    action_type: str,
+    part_id: int,
+    applicant_id: int,
+    approver_ids: list[int],
+    expected_return_date: Optional[date] = None,
+    dest_org_id: Optional[int] = None,
+    reason_code: Optional[str] = None,
+    attachment_ref: Optional[str] = None,
+    remark: Optional[str] = None,
+) -> Approval:
+    rules = _ACTION_RULES[action_type]
+
+    _validate_people(db, applicant_id=applicant_id, approver_ids=approver_ids)
+
     part = db.get(Part, part_id)
     if part is None:
         raise BusinessError("配件不存在")
-    require_status(part, {enums.STATUS_IN_STOCK}, "发起借出")
+    require_status(part, rules["allowed_status"], f"发起{action_type}")
 
-    if _get_inflight_loan(db, part_id) is not None:
-        raise BusinessError("该配件已有「审批中」的借出单，禁止重复发起")
-
-    org = db.get(ExternalOrg, dest_org_id)
-    if org is None:
-        raise BusinessError("外单位不存在")
-    for uid in [applicant_id, *approver_ids]:
-        if db.get(User, uid) is None:
-            raise BusinessError(f"用户不存在: {uid}")
+    if _get_inflight_approval(db, part_id) is not None:
+        raise BusinessError("该配件已有「审批中」的申请单，禁止重复发起")
 
     approval = Approval(
         part_id=part_id,
-        action_type=enums.ACTION_LOAN,
+        action_type=action_type,
         applicant_id=applicant_id,
         applied_at=datetime.now(timezone.utc),
         overall_status=enums.APPROVAL_PENDING,
         current_level=1,
         expected_return_date=expected_return_date,
         dest_org_id=dest_org_id,
+        reason_code=reason_code,
+        attachment_ref=attachment_ref,
         remark=remark,
     )
     db.add(approval)
@@ -85,6 +129,93 @@ def create_loan_approval(
     db.commit()
     db.refresh(approval)
     return get_approval(db, approval.id)
+
+
+def create_loan_approval(
+    db: Session,
+    *,
+    part_id: int,
+    applicant_id: int,
+    dest_org_id: int,
+    expected_return_date: date,
+    approver_ids: list[int],
+    remark: Optional[str] = None,
+) -> Approval:
+    if expected_return_date is None:
+        raise BusinessError("借出必须填写预期归还日")
+    if expected_return_date < date.today():
+        raise BusinessError("预期归还日不得早于申请当日")
+    _require_dest_org(db, dest_org_id)
+    return _create_approval(
+        db,
+        action_type=enums.ACTION_LOAN,
+        part_id=part_id,
+        applicant_id=applicant_id,
+        approver_ids=approver_ids,
+        expected_return_date=expected_return_date,
+        dest_org_id=dest_org_id,
+        remark=remark,
+    )
+
+
+def create_transfer_approval(
+    db: Session,
+    *,
+    part_id: int,
+    applicant_id: int,
+    dest_org_id: int,
+    approver_ids: list[int],
+    reason_code: Optional[str] = None,
+    remark: Optional[str] = None,
+) -> Approval:
+    _require_dest_org(db, dest_org_id)
+    return _create_approval(
+        db,
+        action_type=enums.ACTION_TRANSFER,
+        part_id=part_id,
+        applicant_id=applicant_id,
+        approver_ids=approver_ids,
+        dest_org_id=dest_org_id,
+        reason_code=(reason_code or "").strip() or None,
+        remark=remark,
+    )
+
+
+def create_scrap_approval(
+    db: Session,
+    *,
+    part_id: int,
+    applicant_id: int,
+    approver_ids: list[int],
+    reason_code: str,
+    attachment_ref: Optional[str] = None,
+    remark: Optional[str] = None,
+) -> Approval:
+    if reason_code not in enums.REASON_CODES_SCRAP:
+        raise BusinessError(
+            f"非法报废缘由「{reason_code}」，允许：{'/'.join(enums.REASON_CODES_SCRAP)}"
+        )
+    part = db.get(Part, part_id)
+    if part is None:
+        raise BusinessError("配件不存在")
+    # 高值/敏感件报废必须留影像证据（「无」不算敏感）
+    if (
+        part.sensitivity in enums.SENSITIVITY_REQUIRE_SCRAP_ATTACHMENT
+        and not (attachment_ref or "").strip()
+    ):
+        raise BusinessError(
+            f"该配件为「{part.sensitivity}」件，报废必须提供影像证据（attachment_ref）"
+        )
+    return _create_approval(
+        db,
+        action_type=enums.ACTION_SCRAP,
+        part_id=part_id,
+        applicant_id=applicant_id,
+        approver_ids=approver_ids,
+        reason_code=reason_code,
+        attachment_ref=(attachment_ref or "").strip() or None,
+        remark=remark,
+    )
 
 
 def get_approval(db: Session, approval_id: int) -> Approval:
@@ -118,6 +249,39 @@ def list_approvals(db: Session) -> list[Approval]:
         .unique()
         .all()
     )
+
+
+def withdraw_approval(
+    db: Session, *, approval_id: int, operator_id: int
+) -> Approval:
+    """撤回：仅申请人本人、仅审批中；不写任何履历，已通过环节留痕。"""
+    approval = get_approval(db, approval_id)
+    if approval.overall_status != enums.APPROVAL_PENDING:
+        raise BusinessError(f"审批单已结束（{approval.overall_status}），不可撤回")
+    if operator_id != approval.applicant_id:
+        raise BusinessError("仅申请人本人可撤回")
+    approval.overall_status = enums.APPROVAL_WITHDRAWN
+    db.commit()
+    return get_approval(db, approval_id)
+
+
+def _void_approval(db: Session, approval: Approval, reason: str) -> None:
+    """落履历前状态校验失败：审批作废（驳回 + 系统原因）。"""
+    approval.overall_status = enums.APPROVAL_REJECTED
+    approval.remark = (approval.remark or "") + f"【系统作废】{reason}"
+    # 末级已点「通过」但未落履历：回滚该步，避免 UI 显示 L3 通过而整体驳回
+    for step in approval.steps:
+        if (
+            step.level == approval.current_level
+            and step.step_status == enums.STEP_APPROVED
+        ):
+            step.step_status = enums.STEP_REJECTED
+            note = f"【系统作废】{reason}"
+            step.opinion = (
+                f"{step.opinion}；{note}" if step.opinion else note
+            )
+            break
+    db.commit()
 
 
 def decide_approval(
@@ -158,37 +322,48 @@ def decide_approval(
         db.commit()
         return get_approval(db, approval_id)
 
-    # 末级通过：落履历前重校验仍在库
-    part = db.get(Part, approval.part_id)
+    # 末级通过：落履历前按动作规则重校验起始状态，并加行锁防竞态
+    rules = _ACTION_RULES[approval.action_type]
+    allowed = rules["allowed_status"]
+
+    part = db.scalars(
+        select(Part).where(Part.id == approval.part_id).with_for_update()
+    ).first()
     if part is None:
         raise BusinessError("配件不存在")
-    if part.current_status != enums.STATUS_IN_STOCK:
-        approval.overall_status = enums.APPROVAL_REJECTED
-        # 用意见记录作废原因，便于排查
-        step.opinion = (opinion or "") + (
-            f"【系统作废】落履历前配件状态为「{part.current_status}」，非在库，审批作废"
+    if part.current_status not in allowed:
+        _void_approval(
+            db,
+            approval,
+            f"落履历前配件状态为「{part.current_status}」，"
+            f"不满足「{approval.action_type}」要求（允许：{'/'.join(sorted(allowed))}）",
         )
-        db.commit()
         raise BusinessError(
-            f"审批完成时配件已不在库（当前「{part.current_status}」），审批已作废，未写入借出履历"
+            f"审批完成时配件状态已变化（当前「{part.current_status}」），审批已作废，未写入履历"
         )
 
-    from_kind = part.current_loc_kind
-    from_id = part.current_loc_id
+    # 报废/调拨（终态）离场无外单位；借出/调拨去外单位
+    if rules["loc_to_kind"] == enums.LOC_EXTERNAL:
+        loc_to_kind = enums.LOC_EXTERNAL
+        loc_to_id = approval.dest_org_id
+    else:
+        loc_to_kind = enums.LOC_NONE
+        loc_to_id = None
 
     movement = insert_movement(
         db,
         part_id=part.id,
-        event_type=enums.EVENT_LOAN,
+        event_type=rules["event_type"],
         status_from=part.current_status,
-        status_to=enums.STATUS_LOANED,
-        operator_id=approval.applicant_id,
-        loc_from_kind=from_kind,
-        loc_from_id=from_id,
-        loc_to_kind=enums.LOC_EXTERNAL,
-        loc_to_id=approval.dest_org_id,
+        status_to=rules["status_to"],
+        operator_id=operator_id,  # 实际审批人，非申请人
+        loc_from_kind=part.current_loc_kind,
+        loc_from_id=part.current_loc_id,
+        loc_to_kind=loc_to_kind,
+        loc_to_id=loc_to_id,
         approval_id=approval.id,
         expected_return_date=approval.expected_return_date,
+        reason_code=approval.reason_code,
         remark=approval.remark,
     )
     apply_projection_from_movement(part, movement)

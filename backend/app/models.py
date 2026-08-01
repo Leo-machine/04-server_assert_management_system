@@ -6,6 +6,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -24,10 +25,16 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     role_label: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # 轻量权限角色：操作员 / 审批人 / 管理员（服务端硬校验）
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="操作员")
 
 
 class PartModel(Base):
     __tablename__ = "part_model"
+    __table_args__ = (
+        UniqueConstraint("category", "model_name", name="uq_part_model_cat_name"),
+        Index("ix_part_model_mem_agg", "category", "capacity_gb", "ddr_gen"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     category: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -35,12 +42,23 @@ class PartModel(Base):
     brand: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     pn: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     spec: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # 内存可聚合正式列（方案甲）；其它类型保持 NULL。与 spec 双写。
+    capacity_gb: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ddr_gen: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
     parts: Mapped[list["Part"]] = relationship(back_populates="model")
 
 
 class Part(Base):
     __tablename__ = "part"
+    __table_args__ = (
+        Index(
+            "ix_part_allocatable",
+            "current_status",
+            "owner_unit",
+            "allocatable_flag",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     model_id: Mapped[int] = mapped_column(ForeignKey("part_model.id"), nullable=False)
@@ -50,8 +68,17 @@ class Part(Base):
     contract_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     purchase_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
     purchase_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # responsible_group = 运维部门（列名保持不动，等同「运维部门」）
     responsible_group: Mapped[str] = mapped_column(String(50), nullable=False)
     sensitivity: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # 七类通用公共字段（Demo 03）
+    supplier: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    project: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    owner_unit: Mapped[str] = mapped_column(String(100), nullable=False, default="本单位信息中心")
+    warranty_expiry: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    allocatable_flag: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="通用可调"
+    )
     # 投影缓存；真相在 movement_log
     current_status: Mapped[str] = mapped_column(String(50), nullable=False)
     current_loc_kind: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -66,6 +93,9 @@ class Part(Base):
 
 class Server(Base):
     __tablename__ = "server"
+    __table_args__ = (
+        UniqueConstraint("asset_no", name="uq_server_asset_no"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     asset_no: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -82,10 +112,15 @@ class Server(Base):
 
 class StorageLocation(Base):
     __tablename__ = "storage_location"
+    __table_args__ = (
+        UniqueConstraint("warehouse", "slot", name="uq_storage_warehouse_slot"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     warehouse: Mapped[str] = mapped_column(String(100), nullable=False)
     slot: Mapped[str] = mapped_column(String(100), nullable=False)
+    location_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    allowed_categories: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
 
 
 class PartServerLink(Base):
@@ -103,11 +138,35 @@ class PartServerLink(Base):
 
 class ExternalOrg(Base):
     __tablename__ = "external_org"
+    __table_args__ = (
+        UniqueConstraint("org_name", name="uq_external_org_name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     org_name: Mapped[str] = mapped_column(String(200), nullable=False)
     contact: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     contact_info: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+
+class Brand(Base):
+    __tablename__ = "brand"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    # 适用配件类型（八类子集）。空列表/null = 通用，各类型可选。
+    categories: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+
+
+class Supplier(Base):
+    """供应商名录；配件 Part.supplier 存名称字符串（与品牌同模式）。"""
+
+    __tablename__ = "supplier"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    contact: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    contact_info: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class Approval(Base):
@@ -120,8 +179,16 @@ class Approval(Base):
     applied_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     overall_status: Mapped[str] = mapped_column(String(50), nullable=False)
     current_level: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    expected_return_date: Mapped[date] = mapped_column(Date, nullable=False)
-    dest_org_id: Mapped[int] = mapped_column(ForeignKey("external_org.id"), nullable=False)
+    # 仅借出必填；调拨/报废无归还日
+    expected_return_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # 借出/调拨必填；报废不需要
+    dest_org_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("external_org.id"), nullable=True
+    )
+    # 报废必填（本单位销毁/返厂换新）；调拨可选（划转依据等）
+    reason_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # 高值件报废影像证据引用（一期存引用串，文件上传后续做）
+    attachment_ref: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     steps: Mapped[list["ApprovalStep"]] = relationship(
@@ -153,8 +220,8 @@ class MovementLog(Base):
     __tablename__ = "movement_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    part_id: Mapped[int] = mapped_column(ForeignKey("part.id"), nullable=False)
-    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    part_id: Mapped[int] = mapped_column(ForeignKey("part.id"), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     status_from: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     status_to: Mapped[str] = mapped_column(String(50), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -168,6 +235,10 @@ class MovementLog(Base):
         ForeignKey("approval.id"), nullable=True
     )
     expected_return_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # 报废腿记录销毁方式（本单位销毁/返厂换新）
+    reason_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # 换新成对事件绑定（旧件报废 + 新件入库同组；后续波次启用）
+    event_group_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     part: Mapped["Part"] = relationship(back_populates="movements")
@@ -193,9 +264,12 @@ class Stocktake(Base):
 
 class StocktakeItem(Base):
     __tablename__ = "stocktake_item"
+    __table_args__ = (
+        UniqueConstraint("stocktake_id", "part_id", name="uq_stocktake_item_part"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    stocktake_id: Mapped[int] = mapped_column(ForeignKey("stocktake.id"), nullable=False)
+    stocktake_id: Mapped[int] = mapped_column(ForeignKey("stocktake.id"), nullable=False, index=True)
     part_id: Mapped[Optional[int]] = mapped_column(ForeignKey("part.id"), nullable=True)
     expected_loc_kind: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     expected_loc_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

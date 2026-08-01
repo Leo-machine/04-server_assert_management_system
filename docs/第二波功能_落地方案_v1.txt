@@ -1,0 +1,219 @@
+服务器配件资产管理系统 — 第二波功能落地方案 v1
+（供审阅；批准后再写代码）
+================================================================================
+
+范围：① 认证与角色权限 ② 查询筛选与分页 ③ 超期主动提醒 ④ 盘点差异处置链
+依据：docs/配件资产管理系统_设计文档_v1.md；第一波已交付报废/调拨/损坏/撤回
+不在本波：企业微信/邮件外发通道、维保换新 event_group 逻辑、退役处置清单、
+          附件上传、条码打印、台账导出、PostgreSQL 迁移（第三波及以后）
+
+
+一、认证与角色权限
+--------------------------------------------------------------------------------
+
+现状：X-Operator-Id 头自选身份，服务端无条件信任——只能演示，不能用。
+
+--- 模型变更（user 表，ALTER ADD COLUMN，幂等迁移并入 migrate_wave1 风格）---
+  username       新增 String(50) unique nullable→种子回填
+  password_hash  新增 String(200) nullable（PBKDF2-HMAC-SHA256，stdlib，无新依赖）
+  role           新增 String(20) 默认「操作员」
+                 三值：操作员 / 审批人 / 管理员（沿用中文字符串枚举惯例）
+  种子回填（已有库迁移时同样执行）：
+    张运维 zhangyw / 钱仓管 qiancg → 操作员
+    李组长 lizz / 王主管 wangzg → 审批人
+    赵经理 zhaojl → 管理员
+    初始密码统一 123456，首次登录前端强制引导改密（接口已提供）。
+
+--- 令牌 ---
+  无状态 HMAC 令牌：token = "{user_id}:{expiry_ts}:{hmac_sha256签名}"
+  密钥取环境变量 APP_SECRET，缺省用随机生成并落盘 backend/data/.secret
+  （重启不失效；.demo 够用，生产可换 JWT）。有效期 12 小时。
+  请求头：Authorization: Bearer <token>，取代 X-Operator-Id。
+
+--- 权限矩阵（服务端硬校验，deps 提供 require_roles）---
+  入库/装机/拆下/归还/报损/位置校正        操作员及以上
+  发起借出/调拨/报废申请                  操作员及以上
+  审批 decide                            审批人及以上 + 仍须本级指定审批人
+  撤回                                   申请人本人（不变）
+  盘点 发起/结案/差异复核处置             审批人及以上
+  盘点 现场清点/函证                      操作员及以上
+  品牌/型号 增删改                       管理员
+  服务器运行状态切换                      操作员及以上
+  查询类接口                              任意登录用户
+  审批人候选校验：approver_ids 必须全部为「审批人」或「管理员」角色，
+  否则发起时报 400（前端候选列表同步只给这两类）。
+
+--- 新 API ---
+  POST /api/auth/login           {username, password} → {token, user}
+  POST /api/auth/change-password {old_password, new_password}
+  GET  /api/auth/me              → 当前登录用户
+  其余接口全部改为 Bearer 认证；X-Operator-Id 头移除。
+
+--- 前端 ---
+  登录页（未登录强制跳转）；token 存 localStorage；顶栏显示当前用户+角色+
+  退出登录；去掉"操作人"下拉。审批人下拉只列审批人/管理员。
+  401 统一处理：清 token 回登录页。
+
+
+二、查询筛选与分页
+--------------------------------------------------------------------------------
+
+--- GET /api/parts 改造（向后兼容：不传分页参数时返回全量数组）---
+  查询参数：
+    status          在库/在用/损坏/借出/已调拨/报废
+    category        八类配件类型（join part_model 过滤）
+    responsible_group  基础组/运营组/网络组/平台组
+    keyword         固定资产编号 或 SN 模糊匹配（LIKE %kw%）
+    overdue=true    仅超期借出件
+    page / page_size（默认 1 / 50，上限 200）
+  传分页参数时返回 {items, total, page, page_size}；
+  不传时维持 list[PartOut]（前端老调用不炸）。
+  批量超期计算沿用 batch_is_overdue（先过滤借出件再算，避免全表扫）。
+
+--- GET /api/approvals 增加 status / action_type 过滤参数（可选）。
+
+--- 前端 ---
+  配件列表：筛选条（状态/类型/责任组/关键字回车搜索）+ 分页器；
+  每页 20 条。审批中心：状态下拉过滤。
+
+
+三、超期主动提醒
+--------------------------------------------------------------------------------
+
+--- 模型（新表 notification，create_all 自动建）---
+  id, kind String(30)（超期借出）, part_id FK,
+  payload JSON（资产编号/预期归还日/超期天数）,
+  created_at, read_at nullable
+
+--- 扫描任务 ---
+  lifespan 启动一个 asyncio 后台任务：
+    启动即扫一次，之后每 OVERDUE_SCAN_HOURS 小时扫一次（默认 24，env 可调）。
+  逻辑：借出中配件逐件取最新借出履历 → 今日 > 预期归还日 →
+    若该配件本次借出（按最新借出履历 id）尚无通知，则写 notification。
+    幂等：同一次借出只通知一次；归还后再次借出超期会重新通知。
+  通道：本波只做系统内通知（顶栏铃铛+通知页）。企业微信 webhook 留
+  OVERDUE_WEBHOOK_URL env 接口位，配了就顺带 POST 一份（10 行，可选做）。
+
+--- 新 API ---
+  GET  /api/notifications?unread=true   列表（默认全部，倒序）
+  POST /api/notifications/{id}/read
+  POST /api/notifications/read-all
+
+--- 前端 ---
+  顶栏铃铛（未读数徽标）+ 通知页；首页概览加「超期借出」卡片（点击跳
+  配件列表 overdue 过滤）。
+
+
+四、盘点差异处置链（本波重头）
+--------------------------------------------------------------------------------
+
+现状：差异只能"登记"，复核/处置字段全建好但无接口；盘亏摁住了没下文。
+
+1) 盘点互斥
+   create_stocktake 时若存在「进行中」盘点单 → 400（全局同时只许一单在盘）。
+
+2) 盘点范围扩展（create 入参 scope_kind + scope_value）
+   全盘              现状不变
+   按责任组          scope_value={group:"基础组"} → part.responsible_group 过滤
+   按配件类型        scope_value={category:"内存"} → join model 过滤
+   按机房            scope_value={room:"A机房"} → 在用件所在服务器 room 过滤
+                     （库位件不属任何机房，本范围天然不含库位件，UI 提示）
+   指定清单          scope_value={fixed_asset_nos:[...]} → 按编号逐个解析，
+                     有不存在编号则 400 并列出
+   快照/明细生成逻辑不变，仅 Part 查询加过滤。
+
+3) 差异复核与处置（盘点红线不破：只登记，不动 part）
+   POST /api/stocktakes/{id}/discrepancies/{disc_id}/review
+     {review_conclusion} → reviewer_id=当前用户 + 结论；待复核/挂起追查均可复核
+   POST /api/stocktakes/{id}/discrepancies/{disc_id}/resolve
+     {resolution, linked_ref?} → status=已处置 + 处置去向 + 关联单据
+   两个接口均要求盘点单未归档 + 操作者为审批人及以上。
+   盘亏强制挂起语义不变：盘亏只能经 resolve 关闭，系统不提供任何"自动核销"。
+
+4) 盘盈补录（盘盈 → 转正建账）
+   POST /api/stocktakes/{id}/items/{item_id}/register-surplus
+     {model_id, storage_location_id, source_type, responsible_group,
+      serial_no?, contract_no?, purchase_amount?, purchase_date?, remark?}
+   实现放 services/parts.py（盘点服务红线不动：不 import 写履历函数）：
+     校验该明细确为盘盈行且未补录过（part_id 为空）；
+     复用 inbound 逻辑建配件 + 写入库履历（remark 注明"盘盈补录"，
+     fixed_asset_no 沿用扫码编号）；
+     回填 item.part_id；该盘盈差异自动置「已处置」，
+     resolution="补录入库"，linked_ref=新配件固定资产编号。
+
+5) 错位校正履历（设计 6.4：新增说明性履历，不是改历史）
+   POST /api/parts/{id}/correct-location
+     {loc_kind, loc_id, remark(必填)}
+   新事件类型 EVENT_CORRECT="校正"（第 8 种原子事件，说明性）：
+     status_from=status_to=当前状态（状态不变，仅位置修正）；
+     起始状态限制：在库/损坏/在用（借出件在外单位，位置由函证而非现场校正；
+     终态件禁止）；
+     loc 合法性校验复用第一波 _validate_actual_loc 同款逻辑；
+     服务器位置校正需同步维护 part_server_link（校正到服务器=建立 link，
+     校正出库位=解除 link；投运锁同样生效）。
+   盘点明细页对错位行提供「生成校正」快捷入口（预填实际位置）。
+
+6) 前端盘点页
+   发起盘点：范围类型 + 取值表单；差异列表页：复核/处置对话框；
+   盘盈行「补录」按钮（弹型号选择+入库表单）；错位行「校正」按钮。
+
+
+五、迁移方案
+--------------------------------------------------------------------------------
+app/migrate_wave2.py（lifespan 中 migrate_wave1 之后执行，幂等）：
+  1. user 表 PRAGMA 检查，缺列则 ALTER ADD username/password_hash/role；
+  2. username 为空则按种子映射回填（按 name 匹配），password_hash 为空则
+     置初始密码 123456 的 PBKDF2 哈希，role 为空按 name 映射回填
+     （未知名默认 操作员）；
+  3. notification 表由 create_all 自动建（metadata 注册即可，无需脚本）。
+新装环境 create_all 即新结构 + seed 直接写齐 username/role/初始密码。
+
+
+六、测试清单（tests/test_wave2.py）
+--------------------------------------------------------------------------------
+  认证：登录成功/密码错误 401；无 token 访问受保护接口 401；
+        改密后旧密码失效；操作员调用管理员接口（建品牌）403；
+        审批人候选含纯操作员时发起申请 400
+  筛选分页：status/category/group/keyword 各自与组合过滤正确；
+        分页 total 与切片正确；不传分页参数返回数组（兼容）
+  超期：构造昨日到期借出 → 触发扫描 → 生成通知且重复扫描不重复；
+        归还后再借出超期 → 重新通知
+  盘点：进行中单存在时再发起 400；按责任组/类型/机房/清单范围明细正确；
+        清单含不存在编号 400；review/resolve 字段与状态流转；
+        盘盈补录建账成功+差异自动已处置+履历含"盘盈补录"；
+        校正履历状态不变位置变更+投运锁生效+借出件校正被拦截
+  回归：既有 43 个测试全部适配新认证后通过（conftest 提供登录态 helper）
+
+
+七、待确认点
+--------------------------------------------------------------------------------
+  1. 方案整体是否批准？
+  2. 认证：账号密码+HMAC 令牌（推荐）还是更轻的"保持选人+服务端角色校验"？
+  3. 超期提醒：仅系统内通知（推荐）还是同时接企业微信 webhook（需提供 URL）？
+  4. 盘点范围「按机房」不含库位件（库位无机房属性），接受吗？
+  5. 角色划分（操作员/审批人/管理员）与种子映射是否合适？
+
+
+八、实施顺序（批准后）
+--------------------------------------------------------------------------------
+  1. user 模型 + migrate_wave2 + 种子回填 + 迁移测试
+  2. auth 服务（PBKDF2、令牌签发/校验、deps 角色门禁）+ 全部既有接口切换
+     + conftest 登录 helper + 43 个旧测试适配
+  3. parts 筛选分页 + approvals 过滤 + 测试
+  4. notification 模型 + 超期扫描任务 + API + 测试
+  5. 盘点：互斥/范围/review/resolve/盘盈补录/位置校正 + 测试
+  6. 前端：登录页与令牌管线 → 筛选分页 → 铃铛与超期卡片 → 盘点新能力
+  7. 全量 pytest + 真实 API 冒烟（登录→筛选→超期通知→盘点处置全链）
+================================================================================
+
+评审决议（2026-07-31，已批准开工）
+  1. 方案批准，按调整后范围实施。
+  2. 认证采用【轻量模式】：不做账号密码/令牌，保留顶栏选人（X-Operator-Id），
+     服务端加角色硬校验（操作员/审批人/管理员）。本文档第一节中
+     username/password_hash/令牌/登录页相关内容全部取消，仅保留 role 列
+     与权限矩阵；权限矩阵不变（审批 decide 与盘点管理=审批人及以上，
+     品牌/型号写操作=管理员，审批人候选须为审批人/管理员）。
+  3. 超期【通知延后】：本波不做 notification 表/扫描任务/铃铛；仅保留
+     筛选分页中的 overdue=true 查询过滤（超期清单可随时查）。
+  4. 「按机房」盘点只含在用件：接受。
+================================================================================

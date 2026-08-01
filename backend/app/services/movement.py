@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import enums
@@ -12,6 +13,23 @@ class BusinessError(Exception):
     def __init__(self, message: str):
         self.message = message
         super().__init__(message)
+
+
+class ConflictError(BusinessError):
+    """并发冲突导致的业务错误（如重复固定资产编号、重复安装关系）。"""
+    pass
+
+
+def handle_integrity_error(e: IntegrityError, fallback: str = "数据冲突，请重试") -> BusinessError:
+    """将 IntegrityError 转为友好的 BusinessError / ConflictError。"""
+    msg = str(e.orig) if e.orig else str(e)
+    if "UNIQUE" in msg.upper():
+        if "fixed_asset_no" in msg:
+            return ConflictError("固定资产编号已存在（并发冲突）")
+        if "part_server_link" in msg:
+            return ConflictError("配件已有安装关系（并发冲突）")
+        return ConflictError(f"唯一性冲突：{fallback}")
+    return BusinessError(fallback)
 
 
 def require_status(part: Part, allowed: set[str], action: str) -> None:
@@ -37,6 +55,8 @@ def insert_movement(
     work_order_no: Optional[str] = None,
     approval_id: Optional[int] = None,
     expected_return_date: Optional[date] = None,
+    reason_code: Optional[str] = None,
+    event_group_id: Optional[str] = None,
     remark: Optional[str] = None,
     occurred_at: Optional[datetime] = None,
 ) -> MovementLog:
@@ -55,6 +75,8 @@ def insert_movement(
         work_order_no=work_order_no,
         approval_id=approval_id,
         expected_return_date=expected_return_date,
+        reason_code=reason_code,
+        event_group_id=event_group_id,
         remark=remark,
     )
     db.add(row)
@@ -125,3 +147,40 @@ def is_overdue(db: Session, part: Part, today: Optional[date] = None) -> bool:
     if expected is None:
         return False
     return (today or date.today()) > expected
+
+
+def batch_is_overdue(db: Session, loaned_parts: list[Part], today: Optional[date] = None) -> set[int]:
+    """批量计算借出配件是否超期，一次查询替代 N 次单条查询。"""
+    if not loaned_parts:
+        return set()
+    part_ids = [p.id for p in loaned_parts]
+
+    # 一次拉取所有相关借出履历，在 Python 侧按 part_id 取最新一条
+    rows = (
+        db.execute(
+            select(
+                MovementLog.part_id,
+                MovementLog.expected_return_date,
+                MovementLog.occurred_at,
+            )
+            .where(
+                MovementLog.part_id.in_(part_ids),
+                MovementLog.event_type == enums.EVENT_LOAN,
+            )
+            .order_by(MovementLog.part_id, MovementLog.occurred_at.desc(), MovementLog.id.desc())
+        )
+        .all()
+    )
+
+    # 因已按 (part_id, occurred_at DESC, id DESC) 排序，每组第一条即最新
+    seen: set[int] = set()
+    latest_by_part: dict[int, date] = {}
+    for pid, erd, _occurred in rows:
+        if pid in seen:
+            continue
+        seen.add(pid)
+        if erd is not None:
+            latest_by_part[pid] = erd
+
+    today_date = today or date.today()
+    return {pid for pid, erd in latest_by_part.items() if today_date > erd}

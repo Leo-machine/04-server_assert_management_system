@@ -1,0 +1,168 @@
+服务器配件资产管理系统 — 第一波功能落地方案 v1
+（供审阅；批准后再写代码）
+================================================================================
+
+范围：报废审批 / 调拨审批 / 损坏态 + 坏件拆下 / 审批撤回 / 4 个已实证 bug 修复
+依据：docs/配件资产管理系统_设计文档_v1.md 第 4-7 节；2026-07-31 代码审查报告
+不在本波：在途态、维保换新 event_group 逻辑、退役处置清单、附件上传、
+          认证权限、盘点差异处置链（均列入后续波次，本波只预留字段）
+
+
+一、数据模型变更
+--------------------------------------------------------------------------------
+
+--- Approval（审批单主表，需重建，见"迁移方案"）---
+  expected_return_date   Date → 改为 nullable（仅借出必填；调拨/报废无归还日）
+  dest_org_id            FK → 改为 nullable（借出/调拨必填；报废不需要）
+  reason_code            新增 String(50) nullable
+                         报废必填：本单位销毁 / 返厂换新
+                         调拨可选：划转依据等
+  attachment_ref         新增 String(200) nullable
+                         高值件（sensitivity=管控）报废时必填，存影像证据引用串
+                         （文件上传第三波做，本波只存引用）
+
+--- MovementLog（履历，ALTER TABLE ADD COLUMN，无需重建）---
+  reason_code            新增 String(50) nullable（报废腿记录销毁方式）
+  event_group_id         新增 String(36) nullable（第三波换新绑定用，本波只建列）
+
+--- 枚举新增（enums.py）---
+  EVENT_SCRAP            = "报废"
+  EVENT_TRANSFER         = "调拨"
+  ACTION_SCRAP           = "报废"
+  ACTION_TRANSFER        = "调拨"
+  REASON_CODES_SCRAP     = ("本单位销毁", "返厂换新")
+  （STATUS_DAMAGED / STATUS_TRANSFERRED / STATUS_SCRAPPED 已存在，直接用）
+
+--- 状态机新增流转 ---
+  在用 → 损坏     拆下【备案】（拆下接口加 damaged 标记，投运锁拆同样生效）
+  在库 → 损坏     拆下【备案】（库内发现坏件；事件名沿用设计文档"坏件拆下"，
+                  loc_from = loc_to = 原库位，仅状态跃迁）★待确认点 2
+  在库 → 报废     报废【审批】
+  损坏 → 报废     报废【审批】（报废后 loc_to_kind = 无，实物离场/销毁）
+  在库 → 已调拨   调拨【审批】（loc_to = 外单位，终态）
+  损坏件禁止：装机 / 借出 / 调拨（状态白名单自动拦截）
+  报废 / 已调拨为终态：禁止一切后续事件
+
+
+二、迁移方案（app/migrate_wave1.py，启动时幂等执行）
+--------------------------------------------------------------------------------
+1. movement_log：PRAGMA table_info 检查，缺列则
+   ALTER TABLE movement_log ADD COLUMN reason_code VARCHAR(50);
+   ALTER TABLE movement_log ADD COLUMN event_group_id VARCHAR(36);
+2. approval：SQLite 无法直接改列约束，需重建表：
+   a. PRAGMA 检查是否已是新结构（expected_return_date 可空 / 有 reason_code 列），
+      已是则跳过（幂等）；
+   b. ALTER TABLE approval RENAME TO approval_old;
+   c. 按新结构 CREATE TABLE approval（含 reason_code、attachment_ref，
+      expected_return_date / dest_org_id 可空）；
+   d. INSERT INTO approval SELECT 对应列 FROM approval_old;
+   e. DROP TABLE approval_old;
+3. 新装环境无需迁移：models.py 直接按新结构定义，create_all 即新表。
+4. 迁移在 lifespan 中 seed 之后执行，失败即启动失败并打日志（同现有迁移风格）。
+
+
+三、业务规则（service 层）
+--------------------------------------------------------------------------------
+
+1. 坏件拆下（备案）
+   - uninstall(part_id, storage_location_id, damaged=False, ...) 扩展：
+     damaged=True → 在用→损坏，event_type=拆下，status_to=损坏，loc_to=目标库位；
+     投运锁拆对好件坏件同样生效。
+   - 新增 report_damage(part_id, ...)：在库→损坏，event_type=拆下，
+     loc 不变，仅状态跃迁，remark 必填（说明损坏情况）。
+
+2. 报废审批（一律审批，不看位置）
+   - POST /approvals/scrap，入参：
+     {part_id, reason_code, approver_ids[3], remark?, attachment_ref?}
+   - 发起校验：
+     * 起始状态 ∈ {在库, 损坏}；
+     * reason_code ∈ REASON_CODES_SCRAP；
+     * part.sensitivity = "管控" 时 attachment_ref 必填（6.3 影像证据）；
+     * 三级审批人互不相同 + 申请人回避（复用现有规则）；
+     * 同一配件仅允许一张「审批中」单（不限 action_type，见规则 5）。
+   - 末级通过落履历前：重校验状态仍 ∈ {在库, 损坏}（with_for_update +
+     状态不符则审批作废，复用借出的现成模式）；
+     落履历 event_type=报废、status_to=报废、loc_to_kind=无、
+     reason_code、approval_id、operator=申请人。
+   - 报废为终态，一切后续事件被状态守卫拦截。
+
+3. 调拨审批
+   - POST /approvals/transfer，入参：
+     {part_id, dest_org_id, approver_ids[3], reason_code?, remark?}
+   - 发起校验：起始状态 = 在库；外单位存在；审批人规则同上；
+     in-flight 查重同上。
+   - 末级通过：重校验在库 → 落履历 event_type=调拨、status_to=已调拨、
+     loc_to=外单位/dest_org_id、reason_code（如有）。
+   - 已调拨为终态；盘点函证支线仍按外单位件处理（不变量 #15）。
+
+4. 审批撤回
+   - POST /approvals/{id}/withdraw：仅申请人本人、仅 overall_status=审批中；
+     置为「撤回」，不写任何履历；已通过的环节留痕不擦除。
+
+5. in-flight 查重统一（对现有借出同样生效的行为变更）
+   - 现逻辑只查「审批中的借出单」；改为：同一配件存在任何「审批中」单
+     （借出/调拨/报废）即禁止再发起新申请。
+   - 理由：避免一配件同时挂借出单+报废单，先后审批落履历打架。
+     落履历前的状态重校验兜底逻辑保留不变。
+
+6. 已实证 bug 修复（4 个，审查报告 #1-#4）
+   a. brands.update_brand：改名级联更新所有 PartModel.brand（同事务），
+      删除保护随之恢复有效。
+   b. stocktake.check_item 盘盈去重：同一盘点单已存在相同 scanned_asset_no
+      的盘盈行时，幂等更新该行的实际位置/盘点人/时间并返回，不再新建。
+   c. create_loan_approval：expected_return_date 必须 ≥ 申请当日，
+      否则 BusinessError。
+   d. check_item 位置校验：actual_loc_kind ∈ {库位, 服务器, 外单位}，
+      且 actual_loc_id 在对应表真实存在，否则 BusinessError。
+
+
+四、API 清单
+--------------------------------------------------------------------------------
+  变更  POST /api/parts/{id}/uninstall     入参加 damaged: bool = false
+  新增  POST /api/parts/{id}/damage        在库→损坏，入参 {remark}
+  新增  POST /api/approvals/scrap          发起报废审批
+  新增  POST /api/approvals/transfer       发起调拨审批
+  新增  POST /api/approvals/{id}/withdraw  撤回（仅申请人）
+  变更  ApprovalOut 增加 reason_code / attachment_ref 字段
+  不变  decide / list / get 等其余审批接口（decide 天然通用）
+错误处理：BusinessError → 400；审批单不存在 → 404；统一不变。
+
+
+五、测试清单（tests/ 新增 test_wave1.py + 修补既有测试）
+--------------------------------------------------------------------------------
+  报废：在库发起→三级通过→履历+终态；损坏→报废；驳回不写履历；
+        落履历前状态被改→审批自动作废且不写履历；
+        高值件缺 attachment_ref 被拦截；非法 reason_code 被拦截；
+        终态后再发起任何操作被拦截
+  调拨：在库发起→三级通过→履历+已调拨+loc=外单位；损坏件发起被拦截
+  损坏态：拆下 damaged=True → 在用→损坏；投运服务器坏件拆下仍被锁；
+          report_damage 在库→损坏；损坏件装机/借出/调拨均被拦截
+  撤回：申请人撤回成功；非申请人撤回被拦截；已结束单撤回被拦截；
+        撤回后配件可重新发起申请
+  查重：审批中单存在时发起任意类型申请被拦截（不限类型）
+  bug 修复：品牌改名级联+删除保护；盘盈重复扫码幂等；
+            过去归还日被拦截；非法/不存在盘点位置被拦截
+  回归：既有 23 个测试全部保持通过（in-flight 查重语义变化需同步调整）
+
+
+六、待确认点
+--------------------------------------------------------------------------------
+  1. 本方案整体是否批准开工？
+  2. 「在库 → 损坏」事件类型：沿用设计文档字面（event_type=拆下，loc 不变）
+     还是新增独立事件「报损」？（设计文档 5.1 写的是"坏件拆下"，倾向沿用）
+  3. 前端是否本波同步加入口（报废/调拨申请、撤回按钮、拆下"坏件"选项），
+     还是后端先行、前端下一波？
+  4. 借出的在途态维持 demo 约定不补（借出/归还直接落终态），确认无误？
+
+
+七、实施顺序（批准后）
+--------------------------------------------------------------------------------
+  1. enums + models + 迁移脚本 + 迁移幂等测试
+  2. 4 个 bug 修复 + 对应测试
+  3. 损坏态（uninstall 扩展 + report_damage）+ 测试
+  4. approvals 服务泛化（action_type 分发、报废/调拨、查重统一、撤回）+ 测试
+  5. 路由 + schemas 接线
+  6. 全量 pytest 回归 + 真实 API 冒烟（uvicorn 起服，curl 走通
+     报废/调拨/撤回/坏件拆下四条新链路）
+  7. （如确认点 3 选同步）前端入口
+================================================================================

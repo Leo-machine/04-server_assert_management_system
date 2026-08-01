@@ -20,16 +20,76 @@ class PartModelOut(BaseModel):
     brand: Optional[str] = None
     pn: Optional[str] = None
     spec: Optional[dict] = None
+    capacity_gb: Optional[int] = None
+    ddr_gen: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+
+class PartModelIn(BaseModel):
+    category: str
+    model_name: str
+    brand: Optional[str] = None
+    pn: Optional[str] = None
+    spec: Optional[dict] = None
+
+
+class PartModelUpdateIn(BaseModel):
+    category: Optional[str] = None
+    model_name: Optional[str] = None
+    brand: Optional[str] = None
+    pn: Optional[str] = None
+    spec: Optional[dict] = None
+
+
+class CategoryFieldOut(BaseModel):
+    key: str
+    label: str
+    type: str
+    required: bool = False
+    options: Optional[list[str]] = None
+    unit: Optional[str] = None
+    placeholder: Optional[str] = None
+
+
+class CategorySchemaOut(BaseModel):
+    category: str
+    fields: list[CategoryFieldOut]
 
 
 class StorageLocationOut(BaseModel):
     id: int
     warehouse: str
     slot: str
+    location_type: Optional[str] = None
+    allowed_categories: Optional[list] = None
+    part_count: Optional[int] = None
 
     model_config = {"from_attributes": True}
+
+
+class StorageLocationIn(BaseModel):
+    warehouse: str
+    slot: str
+    location_type: Optional[str] = None
+    allowed_categories: Optional[list] = None
+
+
+class StorageLocationUpdateIn(BaseModel):
+    warehouse: Optional[str] = None
+    slot: Optional[str] = None
+    location_type: Optional[str] = None
+    allowed_categories: Optional[list] = None
+
+
+class LocationDistributionOut(BaseModel):
+    id: int
+    warehouse: str
+    slot: str
+    location_type: Optional[str] = None
+    allowed_categories: Optional[list] = None
+    part_count: int
+    parts_by_status: dict = {}
 
 
 class ExternalOrgOut(BaseModel):
@@ -68,8 +128,13 @@ class PartOut(BaseModel):
     contract_no: Optional[str] = None
     purchase_amount: Optional[Decimal] = None
     purchase_date: Optional[date] = None
-    responsible_group: str
+    responsible_group: str  # 运维部门（列名保持不动）
     sensitivity: Optional[str] = None
+    supplier: Optional[str] = None
+    project: Optional[str] = None
+    owner_unit: str
+    warranty_expiry: Optional[date] = None
+    allocatable_flag: str
     current_status: str
     current_loc_kind: Optional[str] = None
     current_loc_id: Optional[int] = None
@@ -94,6 +159,8 @@ class MovementOut(BaseModel):
     work_order_no: Optional[str] = None
     approval_id: Optional[int] = None
     expected_return_date: Optional[date] = None
+    reason_code: Optional[str] = None
+    event_group_id: Optional[str] = None
     remark: Optional[str] = None
 
     model_config = {"from_attributes": True}
@@ -103,14 +170,37 @@ class InboundIn(BaseModel):
     model_id: int
     fixed_asset_no: str
     storage_location_id: int
-    source_type: str = "单独合同"
-    responsible_group: str = "基础组"
-    serial_no: Optional[str] = None
-    contract_no: Optional[str] = None
-    purchase_amount: Optional[Decimal] = None
-    purchase_date: Optional[date] = None
-    sensitivity: Optional[str] = None
-    remark: Optional[str] = None
+    source_type: str
+    responsible_group: str  # 运维部门
+    serial_no: str
+    contract_no: str
+    purchase_amount: Decimal
+    purchase_date: date
+    sensitivity: str
+    supplier: str
+    project: str
+    owner_unit: str
+    warranty_expiry: date
+    allocatable_flag: str
+    remark: str
+
+
+class PartPublicUpdateIn(BaseModel):
+    supplier: Optional[str] = None
+    project: Optional[str] = None
+    owner_unit: Optional[str] = None
+    warranty_expiry: Optional[date] = None
+    clear_warranty: bool = False
+    allocatable_flag: Optional[str] = None
+
+
+class AllocatableSummaryItem(BaseModel):
+    category: str
+    capacity_gb: Optional[int] = None
+    ddr_gen: Optional[str] = None
+    spec_label: str
+    allocatable_count: int
+    home_owner_unit: str
 
 
 class InstallIn(BaseModel):
@@ -121,7 +211,12 @@ class InstallIn(BaseModel):
 
 class UninstallIn(BaseModel):
     storage_location_id: int
+    damaged: bool = False  # True = 坏件拆下（在用→损坏）
     remark: Optional[str] = None
+
+
+class DamageIn(BaseModel):
+    remark: str  # 必填，说明损坏情况
 
 
 class ReturnIn(BaseModel):
@@ -134,6 +229,22 @@ class LoanApprovalIn(BaseModel):
     dest_org_id: int
     expected_return_date: date
     approver_ids: list[int] = Field(..., min_length=3, max_length=3)
+    remark: Optional[str] = None
+
+
+class TransferApprovalIn(BaseModel):
+    part_id: int
+    dest_org_id: int
+    approver_ids: list[int] = Field(..., min_length=3, max_length=3)
+    reason_code: Optional[str] = None
+    remark: Optional[str] = None
+
+
+class ScrapApprovalIn(BaseModel):
+    part_id: int
+    reason_code: str
+    approver_ids: list[int] = Field(..., min_length=3, max_length=3)
+    attachment_ref: Optional[str] = None
     remark: Optional[str] = None
 
 
@@ -163,8 +274,10 @@ class ApprovalOut(BaseModel):
     applied_at: datetime
     overall_status: str
     current_level: int
-    expected_return_date: date
-    dest_org_id: int
+    expected_return_date: Optional[date] = None
+    dest_org_id: Optional[int] = None
+    reason_code: Optional[str] = None
+    attachment_ref: Optional[str] = None
     remark: Optional[str] = None
     steps: list[ApprovalStepOut] = []
     applicant: Optional[UserOut] = None
@@ -257,3 +370,47 @@ class StocktakeListOut(BaseModel):
     status: str
 
     model_config = {"from_attributes": True}
+
+
+# ----- 品牌 -----
+class BrandOut(BaseModel):
+    id: int
+    name: str
+    categories: Optional[list[str]] = None
+
+    model_config = {"from_attributes": True}
+
+
+class BrandIn(BaseModel):
+    name: str
+    categories: Optional[list[str]] = None
+
+
+class BrandUpdateIn(BaseModel):
+    name: Optional[str] = None
+    categories: Optional[list[str]] = None
+
+
+# ----- 供应商 -----
+class SupplierOut(BaseModel):
+    id: int
+    name: str
+    contact: Optional[str] = None
+    contact_info: Optional[str] = None
+    remark: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class SupplierIn(BaseModel):
+    name: str
+    contact: Optional[str] = None
+    contact_info: Optional[str] = None
+    remark: Optional[str] = None
+
+
+class SupplierUpdateIn(BaseModel):
+    name: Optional[str] = None
+    contact: Optional[str] = None
+    contact_info: Optional[str] = None
+    remark: Optional[str] = None

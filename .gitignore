@@ -2,7 +2,9 @@ backend/.venv/
 backend/data/
 backend/**/__pycache__/
 backend/.pytest_cache/
+backend/.vite/
 frontend/node_modules/
 frontend/dist/
+.workbuddy/
 .DS_Store
 *.pyc

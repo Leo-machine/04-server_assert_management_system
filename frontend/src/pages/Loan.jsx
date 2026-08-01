@@ -57,6 +57,9 @@ export default function Loan() {
 
   return (
     <div className="panel">
+      <button type="button" className="back-link" onClick={() => nav('/')}>
+        返回配件列表
+      </button>
       <h2>发起借出（三级审批）</h2>
       {part && (
         <p className="muted">

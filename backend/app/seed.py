@@ -7,7 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import enums
+from .migrate_brands import DEFAULT_BRAND_CATEGORIES
 from .models import (
+    Brand,
     ExternalOrg,
     MovementLog,
     Part,
@@ -15,6 +17,7 @@ from .models import (
     PartServerLink,
     Server,
     StorageLocation,
+    Supplier,
     User,
 )
 from .services.movement import apply_projection_from_movement, insert_movement
@@ -34,35 +37,99 @@ def seed_if_empty(db: Session) -> None:
     db.add_all(users)
     db.flush()
 
+    brands = [
+        Brand(name=name, categories=cats or None)
+        for name, cats in DEFAULT_BRAND_CATEGORIES.items()
+    ]
+    db.add_all(brands)
+    db.flush()
+
+    suppliers = [
+        Supplier(name="三星代理商", contact="陈经理", contact_info="13800001111"),
+        Supplier(name="浪潮渠道", contact="刘工", contact_info="13800002222"),
+        Supplier(name="戴尔授权经销商", contact="王经理", contact_info="13800003333"),
+        Supplier(name="通用配件供应商", contact="赵仓", contact_info="13800004444"),
+    ]
+    db.add_all(suppliers)
+    db.flush()
+
     models = [
         PartModel(
             category="内存",
-            model_name="三星 32GB DDR5-4800 RDIMM",
+            model_name="三星 32GB DDR4-3200 RDIMM",
             brand="三星",
-            pn="M321R4GA3BB6-CQK",
-            spec={"容量GB": 32},
+            pn="M393A4K40EB3-CWE",
+            spec={"容量GB": 32, "内存类型": "DDR4", "频率MHz": 3200},
+            capacity_gb=32,
+            ddr_gen="DDR4",
         ),
         PartModel(
-            category="GPU卡",
-            model_name="NVIDIA A100 80GB PCIe",
-            brand="NVIDIA",
-            pn="NVIDIA-A100-80G",
-            spec={"显存GB": 80, "封装": "PCIe"},
+            category="内存",
+            model_name="海力士 32GB DDR4-3200 RDIMM",
+            brand="海力士",
+            pn="HMA84GR7CJR4N-XN",
+            spec={"容量GB": 32, "内存类型": "DDR4", "频率MHz": 3200},
+            capacity_gb=32,
+            ddr_gen="DDR4",
+        ),
+        PartModel(
+            category="机械硬盘",
+            model_name="希捷 4TB SAS 7.2K",
+            brand="希捷",
+            pn="ST4000NM002A",
+            spec={"容量TB": 4, "接口": "SAS", "转速": "7200"},
+        ),
+        PartModel(
+            category="固态硬盘",
+            model_name="三星 PM9A3 1.92TB NVMe",
+            brand="三星",
+            pn="MZQL21T9HCJR",
+            spec={"容量GB": 1920, "接口协议": "NVMe", "形态": "U.2"},
+        ),
+        PartModel(
+            category="RAID卡",
+            model_name="Broadcom MegaRAID 9560-8i",
+            brand="Broadcom",
+            pn="05-50013-00",
+            spec={"通道数": 8, "缓存MB": 4096, "支持RAID级别": "0/1/5/6/10"},
         ),
         PartModel(
             category="光模块",
             model_name="通用 25G SR SFP28",
             brand="通用",
             pn="SFP28-25G-SR",
-            spec={"类型": "多模SR"},
+            spec={"速率": "25G", "类型": "多模SR", "厂商兼容": "通用"},
+        ),
+        PartModel(
+            category="网卡",
+            model_name="Mellanox ConnectX-6 Dx 25G",
+            brand="Mellanox",
+            pn="MCX623106AN-CDAT",
+            spec={"速率": "25G", "口型": "光口", "端口数": 2},
+        ),
+        PartModel(
+            category="HBA卡",
+            model_name="Broadcom 9500-8e SAS HBA",
+            brand="Broadcom",
+            pn="05-50011-00",
+            spec={"子类型": "SAS-HBA", "速率": "12G-SAS", "端口数": 8},
+        ),
+        PartModel(
+            category="算力卡",
+            model_name="NVIDIA A100 80GB PCIe",
+            brand="NVIDIA",
+            pn="NVIDIA-A100-80G",
+            spec={"显存GB": 80, "封装": "PCIe", "架构": "Ampere"},
         ),
     ]
     db.add_all(models)
     db.flush()
 
     locs = [
-        StorageLocation(warehouse="一号库", slot="A-01"),
-        StorageLocation(warehouse="一号库", slot="B-02"),
+        StorageLocation(warehouse="一号库房", slot="A-01", location_type="库房货架", allowed_categories=None),
+        StorageLocation(warehouse="A栋数据中心", slot="Rack-B-03", location_type="机房备件柜", allowed_categories=None),
+        StorageLocation(warehouse="一号库房", slot="C-03", location_type="库房货架", allowed_categories=["内存", "固态硬盘"]),
+        StorageLocation(warehouse="A栋数据中心", slot="Rack-D-12", location_type="数据中心机柜", allowed_categories=["GPU卡", "算力卡"]),
     ]
     db.add_all(locs)
     db.flush()
@@ -101,7 +168,8 @@ def seed_if_empty(db: Session) -> None:
     operator_id = users[0].id
     now = datetime.now(timezone.utc)
 
-    # 在库件（可用于装机 / 借出）
+    # 在库件（可用于装机 / 借出 / 可调余量演示）
+    # 内存可调口径：在库 ∩ 本单位信息中心 ∩ 通用可调 → 1001+2001=2（跨品牌同规格聚合）
     stock_parts = [
         Part(
             model_id=models[0].id,
@@ -112,16 +180,23 @@ def seed_if_empty(db: Session) -> None:
             purchase_amount=Decimal("800.00"),
             purchase_date=date(2026, 1, 10),
             responsible_group="基础组",
+            supplier="三星代理商",
+            project="机房扩容-2026",
+            owner_unit=enums.HOME_OWNER_UNIT,
+            warranty_expiry=date(2029, 1, 10),
+            allocatable_flag=enums.ALLOC_GENERAL,
             current_status=enums.STATUS_IN_STOCK,
             current_loc_kind=enums.LOC_STORAGE,
             current_loc_id=locs[0].id,
         ),
         Part(
-            model_id=models[2].id,
+            model_id=models[5].id,  # 光模块
             fixed_asset_no="FA-OPT-3001",
             serial_no="SN-OPT-3001",
             source_type="随器采购",
             responsible_group="网络组",
+            owner_unit=enums.HOME_OWNER_UNIT,
+            allocatable_flag=enums.ALLOC_GENERAL,
             current_status=enums.STATUS_IN_STOCK,
             current_loc_kind=enums.LOC_STORAGE,
             current_loc_id=locs[1].id,
@@ -132,9 +207,35 @@ def seed_if_empty(db: Session) -> None:
             serial_no="SN-MEM-1002",
             source_type="单独合同",
             responsible_group="基础组",
+            owner_unit=enums.HOME_OWNER_UNIT,
+            allocatable_flag=enums.ALLOC_RESERVED,  # 保留，不计入可调余量
             current_status=enums.STATUS_IN_STOCK,
             current_loc_kind=enums.LOC_STORAGE,
             current_loc_id=locs[0].id,
+        ),
+        Part(
+            model_id=models[1].id,  # 海力士同规格，跨型号聚合
+            fixed_asset_no="FA-MEM-2001",
+            serial_no="SN-MEM-2001",
+            source_type="单独合同",
+            responsible_group="基础组",
+            owner_unit=enums.HOME_OWNER_UNIT,
+            allocatable_flag=enums.ALLOC_GENERAL,
+            current_status=enums.STATUS_IN_STOCK,
+            current_loc_kind=enums.LOC_STORAGE,
+            current_loc_id=locs[0].id,
+        ),
+        Part(
+            model_id=models[0].id,
+            fixed_asset_no="FA-MEM-1004",
+            serial_no="SN-MEM-1004",
+            source_type="单独合同",
+            responsible_group="基础组",
+            owner_unit="外单位托管资产",  # 非本单位，不计入
+            allocatable_flag=enums.ALLOC_GENERAL,
+            current_status=enums.STATUS_IN_STOCK,
+            current_loc_kind=enums.LOC_STORAGE,
+            current_loc_id=locs[1].id,
         ),
     ]
     db.add_all(stock_parts)
@@ -157,7 +258,7 @@ def seed_if_empty(db: Session) -> None:
 
     # 投运服务器上的在用件（演示投运锁拆）
     live_part = Part(
-        model_id=models[1].id,
+        model_id=models[8].id,  # 算力卡
         fixed_asset_no="FA-GPU-2001",
         serial_no="SN-GPU-2001",
         source_type="单独合同",
@@ -166,6 +267,8 @@ def seed_if_empty(db: Session) -> None:
         purchase_date=date(2025, 6, 1),
         responsible_group="平台组",
         sensitivity="管控",
+        owner_unit=enums.HOME_OWNER_UNIT,
+        allocatable_flag=enums.ALLOC_RESERVED,
         current_status=enums.STATUS_IN_USE,
         current_loc_kind=enums.LOC_SERVER,
         current_loc_id=servers[0].id,
@@ -205,13 +308,15 @@ def seed_if_empty(db: Session) -> None:
         PartServerLink(part_id=live_part.id, server_id=servers[0].id, slot="GPU0")
     )
 
-    # 未投运服务器上的在用件（可直接演示拆下）
+    # 未投运服务器上的在用件（可直接演示拆下；在用不计入可调）
     idle_part = Part(
         model_id=models[0].id,
         fixed_asset_no="FA-MEM-1003",
         serial_no="SN-MEM-1003",
         source_type="随器采购",
         responsible_group="运营组",
+        owner_unit=enums.HOME_OWNER_UNIT,
+        allocatable_flag=enums.ALLOC_GENERAL,
         current_status=enums.STATUS_IN_USE,
         current_loc_kind=enums.LOC_SERVER,
         current_loc_id=servers[1].id,

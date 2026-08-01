@@ -15,8 +15,12 @@ export default function Install() {
     Promise.all([api.get(`/parts/${id}`), api.get('/servers')]).then(([p, s]) => {
       setPart(p)
       setServers(s)
-      const idle = s.find((x) => x.run_status === '未投运') || s[0]
-      setServerId(String(idle?.id || ''))
+      const idle = s.find((x) => x.run_status === '未投运')
+      const target = idle || s[0]
+      setServerId(String(target?.id || ''))
+      if (!idle && s.length > 0) {
+        setError('注意：当前无「未投运」服务器，如选投运服务器则装机后无法拆下。')
+      }
     }).catch((e) => setError(e.message))
   }, [id])
 
@@ -36,6 +40,9 @@ export default function Install() {
 
   return (
     <div className="panel">
+      <button type="button" className="back-link" onClick={() => nav('/')}>
+        返回配件列表
+      </button>
       <h2>装机</h2>
       {part && (
         <p className="muted">

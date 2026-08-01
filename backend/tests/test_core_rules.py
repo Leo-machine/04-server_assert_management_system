@@ -291,7 +291,7 @@ def test_revalidate_in_stock_before_loan_movement(client):
         headers=op_headers(a3["id"]),
     )
     assert final.status_code == 400
-    assert "不在库" in final.json()["detail"]
+    assert "审批已作废" in final.json()["detail"]
 
     part = client.get(f"/api/parts/{part_id}").json()
     assert part["current_status"] == enums.STATUS_IN_USE

@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api'
+import ListToolbar from '../components/ListToolbar'
+import { filterByQuery } from '../lib/fuzzy'
 
 export default function StocktakeList() {
   const [list, setList] = useState([])
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
+  const [query, setQuery] = useState('')
 
   function load() {
     return api.get('/stocktakes').then(setList).catch((e) => setError(e.message))
@@ -14,6 +17,18 @@ export default function StocktakeList() {
   useEffect(() => {
     load()
   }, [])
+
+  const visible = useMemo(
+    () =>
+      filterByQuery(list, query, (s) => [
+        s.id,
+        s.scope_kind,
+        s.status,
+        s.initiated_at,
+        s.snapshot_at,
+      ]),
+    [list, query],
+  )
 
   async function createFull() {
     setError('')
@@ -34,7 +49,19 @@ export default function StocktakeList() {
       {error && <div className="error">{error}</div>}
       {msg && <div className="ok-msg">{msg}</div>}
       <button type="button" onClick={createFull}>发起全盘</button>
-      <table style={{ marginTop: '1rem' }}>
+
+      <ListToolbar
+        query={query}
+        onQueryChange={setQuery}
+        placeholder="搜索单号 / 范围 / 状态…"
+        resultText={
+          <>
+            显示 <strong>{visible.length}</strong> / {list.length}
+          </>
+        }
+      />
+
+      <table style={{ marginTop: '0.5rem' }}>
         <thead>
           <tr>
             <th>单号</th>
@@ -46,7 +73,7 @@ export default function StocktakeList() {
           </tr>
         </thead>
         <tbody>
-          {list.map((s) => (
+          {visible.map((s) => (
             <tr key={s.id}>
               <td>#{s.id}</td>
               <td>{s.scope_kind}</td>
@@ -58,7 +85,9 @@ export default function StocktakeList() {
           ))}
         </tbody>
       </table>
-      {!list.length && <p className="muted">暂无盘点单</p>}
+      {!visible.length && (
+        <p className="muted">{list.length ? '无匹配盘点单' : '暂无盘点单'}</p>
+      )}
     </div>
   )
 }

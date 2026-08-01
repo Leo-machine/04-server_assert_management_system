@@ -9,7 +9,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from .. import enums
-from ..models import Part, Stocktake, StocktakeDiscrepancy, StocktakeItem, User
+from ..models import (
+    ExternalOrg,
+    Part,
+    Server,
+    Stocktake,
+    StocktakeDiscrepancy,
+    StocktakeItem,
+    StorageLocation,
+    User,
+)
 from .movement import BusinessError
 
 # 红线：本模块只允许从 movement 导入 BusinessError；禁止导入任何写履历/改投影符号。
@@ -64,6 +73,32 @@ def _loc_equal(
     id_b: Optional[int],
 ) -> bool:
     return kind_a == kind_b and id_a == id_b
+
+
+_LOC_MODELS = {
+    enums.LOC_STORAGE: StorageLocation,
+    enums.LOC_SERVER: Server,
+    enums.LOC_EXTERNAL: ExternalOrg,
+}
+
+
+def _validate_actual_loc(
+    db: Session,
+    loc_kind: Optional[str],
+    loc_id: Optional[int],
+) -> None:
+    """实际位置种类必须合法，且对应位置记录真实存在。"""
+    if loc_kind is None:
+        return
+    model = _LOC_MODELS.get(loc_kind)
+    if model is None:
+        raise BusinessError(
+            f"非法位置种类「{loc_kind}」，允许：{'/'.join(_LOC_MODELS)}"
+        )
+    if loc_id is None:
+        raise BusinessError(f"位置种类为「{loc_kind}」时必须提供位置 ID")
+    if db.get(model, loc_id) is None:
+        raise BusinessError(f"位置不存在：{loc_kind} #{loc_id}")
 
 
 def _clear_discrepancy(db: Session, item: StocktakeItem) -> None:
@@ -199,11 +234,29 @@ def check_item(
     if not asset_no:
         raise BusinessError("scanned_asset_no 必填")
 
+    _validate_actual_loc(db, actual_loc_kind, actual_loc_id)
+
     # ----- 分支 3：查全表无件 → 盘盈 -----
     part_in_system = db.scalars(
         select(Part).where(Part.fixed_asset_no == asset_no)
     ).first()
     if part_in_system is None:
+        # 同一编号重复扫码：幂等更新已有盘盈行，不重复登记
+        existing = next(
+            (
+                i
+                for i in st.items
+                if i.result == enums.RESULT_SURPLUS and i.scanned_asset_no == asset_no
+            ),
+            None,
+        )
+        if existing is not None:
+            existing.actual_loc_kind = actual_loc_kind
+            existing.actual_loc_id = actual_loc_id
+            existing.checker_id = operator_id
+            existing.checked_at = utcnow()
+            db.commit()
+            return _reload_item(db, existing.id)
         item = StocktakeItem(
             stocktake_id=st.id,
             part_id=None,
@@ -274,6 +327,11 @@ def _resolve_in_scope_item(
             raise BusinessError("明细不存在或不属于本盘点单")
         if item.part_id is None:
             raise BusinessError("盘盈明细不能报账内盘亏")
+        # 同时传入 asset_no 和 item_id 时校验一致性
+        if asset_no and item.part is not None and item.part.fixed_asset_no != asset_no:
+            raise BusinessError(
+                f"资产编号 {asset_no} 与明细 #{item_id} 对应的 {item.part.fixed_asset_no} 不一致"
+            )
         return item
     if not asset_no:
         raise BusinessError("missing=true 时须提供 scanned_asset_no 或 item_id")
