@@ -382,7 +382,7 @@ export default function Inbound() {
                 <input value={form.owner_unit} onChange={set('owner_unit')} required placeholder="本单位信息中心" />
               </label>
               <label>
-                采购日期 *
+                到货验收日期 *
                 <input type="date" value={form.purchase_date} onChange={set('purchase_date')} required />
               </label>
               <label>

@@ -273,7 +273,7 @@ def return_part(
 # ----- 模板导出 / 批量导入 -----
 INBOUND_CSV_HEADER = (
     "固定资产编号,序列号SN,型号ID,来源,运维部门,供应商,合同号,所属项目,"
-    "采购金额,采购日期,产权单位,维保到期,可调配标记,敏感标记,备注"
+    "采购金额,到货验收日期,产权单位,维保到期,可调配标记,敏感标记,备注"
 )
 
 
@@ -324,7 +324,7 @@ def batch_inbound(
                 serial_no=(row.get("序列号SN") or "").strip(),
                 contract_no=(row.get("合同号") or "").strip(),
                 purchase_amount=float(row.get("采购金额") or 0),
-                purchase_date=row.get("采购日期") or "2026-01-01",
+                purchase_date=row.get("到货验收日期") or row.get("采购日期") or "2026-01-01",
                 sensitivity=row.get("敏感标记") or "无",
                 supplier=(row.get("供应商") or "").strip(),
                 project=(row.get("所属项目") or row.get("项目") or "批量导入").strip(),

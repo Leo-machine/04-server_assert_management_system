@@ -41,13 +41,15 @@ CSV_COLUMNS = [
     ("合同号", "contract_no"),
     ("所属项目", "project"),
     ("产权单位", "owner_unit"),
-    ("采购日期", "purchase_date"),
+    ("到货验收日期", "purchase_date"),
     ("维保到位时间", "warranty_expiry"),
     ("采购金额", "purchase_amount"),
     ("可调配标记", "allocatable_flag"),
     ("备注", "remark"),
 ]
 _HEADER_TO_FIELD = {h: f for h, f in CSV_COLUMNS}
+# 旧表头别名（兼容历史模板）
+_HEADER_ALIASES = {"采购日期": "到货验收日期"}
 
 # 非原装来源的必填列
 _MANUAL_REQUIRED = (
@@ -57,7 +59,7 @@ _MANUAL_REQUIRED = (
     "合同号",
     "所属项目",
     "产权单位",
-    "采购日期",
+    "到货验收日期",
     "维保到位时间",
 )
 
@@ -158,7 +160,7 @@ def parse_parts_csv(db: Session, content: str) -> dict:
         header = next(reader)
     except StopIteration:
         raise BusinessError("CSV 内容为空")
-    header = [h.strip() for h in header]
+    header = [_HEADER_ALIASES.get(h.strip(), h.strip()) for h in header]
     unknown = [h for h in header if h not in _HEADER_TO_FIELD]
     if unknown:
         raise BusinessError(f"表头含未知列：{'、'.join(unknown)}（请使用下载的模板）")
@@ -292,7 +294,7 @@ def parse_parts_csv(db: Session, content: str) -> dict:
                 )
             if supplier and supplier not in supplier_names:
                 errors.append(f"【供应商】「{supplier}」不在名录中，请先维护")
-            purchase_date = _parse_date(cell(raw, "采购日期"), errors, "采购日期")
+            purchase_date = _parse_date(cell(raw, "到货验收日期"), errors, "到货验收日期")
             warranty = _parse_date(cell(raw, "维保到位时间"), errors, "维保到位时间")
 
         kwargs = {

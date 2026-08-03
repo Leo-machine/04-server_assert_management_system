@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, getStoredUser } from '../api'
+import HeaderFilter from '../components/HeaderFilter'
 import ListToolbar from '../components/ListToolbar'
 import ImportWizard from '../components/ImportWizard'
 import { useSelection } from '../hooks/useSelection'
@@ -24,6 +25,30 @@ const EMPTY_FORM = {
 }
 
 const GROUPS = ['基础组', '运营组', '网络组', '平台组']
+const RUN_STATUS_OPTIONS = ['未投运', '投运', '退役']
+
+function roomRackLabel(s) {
+  const room = (s.room || '').trim()
+  const rack = (s.rack || '').trim()
+  if (!room && !rack) return '-'
+  return `${room} / ${rack}`
+}
+
+function warrantyLabel(s) {
+  return s.warranty_expiry || '-'
+}
+
+function contractLabel(s) {
+  return s.contract_no || '-'
+}
+
+function supplierLabel(s) {
+  return s.supplier || '-'
+}
+
+function modelLabel(s) {
+  return s.model || '-'
+}
 
 function ServerForm({ initial, onSubmit, onCancel, busy, title, suppliers, serverModels }) {
   const [form, setForm] = useState(initial)
@@ -142,6 +167,23 @@ function ServerForm({ initial, onSubmit, onCancel, busy, title, suppliers, serve
   )
 }
 
+function countBy(list, keyFn) {
+  const m = {}
+  for (const item of list) {
+    const k = keyFn(item)
+    m[k] = (m[k] || 0) + 1
+  }
+  return m
+}
+
+function sortedKeys(totals) {
+  return Object.keys(totals).sort((a, b) => {
+    if (a === '-') return 1
+    if (b === '-') return -1
+    return a.localeCompare(b, 'zh')
+  })
+}
+
 export default function Servers() {
   const me = getStoredUser()
   const isAdmin = me?.role === '管理员'
@@ -157,6 +199,15 @@ export default function Servers() {
   const [showImport, setShowImport] = useState(false)
   const [busy, setBusy] = useState(false)
 
+  const [filterModel, setFilterModel] = useState('')
+  const [filterRoomRack, setFilterRoomRack] = useState('')
+  const [filterGroup, setFilterGroup] = useState('')
+  const [filterContract, setFilterContract] = useState('')
+  const [filterSupplier, setFilterSupplier] = useState('')
+  const [filterWarranty, setFilterWarranty] = useState('')
+  const [filterRunStatus, setFilterRunStatus] = useState('')
+  const [openFilter, setOpenFilter] = useState('')
+
   function load() {
     return api.get('/servers').then(setServers).catch((e) => setError(e.message))
   }
@@ -167,7 +218,7 @@ export default function Servers() {
     api.get('/part-models?category=' + encodeURIComponent('服务器')).then(setServerModels).catch(() => {})
   }, [])
 
-  const visible = useMemo(
+  const searched = useMemo(
     () =>
       filterByQuery(servers, query, (s) => [
         s.asset_no,
@@ -183,8 +234,92 @@ export default function Servers() {
       ]),
     [servers, query],
   )
+
+  function applyColumnFilters(list, skip = '') {
+    return list.filter((s) => {
+      if (skip !== 'model' && filterModel && modelLabel(s) !== filterModel) return false
+      if (skip !== 'roomRack' && filterRoomRack && roomRackLabel(s) !== filterRoomRack) return false
+      if (skip !== 'group' && filterGroup && (s.responsible_group || '') !== filterGroup) return false
+      if (skip !== 'contract' && filterContract && contractLabel(s) !== filterContract) return false
+      if (skip !== 'supplier' && filterSupplier && supplierLabel(s) !== filterSupplier) return false
+      if (skip !== 'warranty' && filterWarranty && warrantyLabel(s) !== filterWarranty) return false
+      if (skip !== 'runStatus' && filterRunStatus && (s.run_status || '') !== filterRunStatus) return false
+      return true
+    })
+  }
+
+  const visible = useMemo(
+    () => applyColumnFilters(searched),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      searched,
+      filterModel,
+      filterRoomRack,
+      filterGroup,
+      filterContract,
+      filterSupplier,
+      filterWarranty,
+      filterRunStatus,
+    ],
+  )
+
+  const modelTotals = useMemo(
+    () => countBy(applyColumnFilters(searched, 'model'), modelLabel),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searched, filterRoomRack, filterGroup, filterContract, filterSupplier, filterWarranty, filterRunStatus],
+  )
+  const roomRackTotals = useMemo(
+    () => countBy(applyColumnFilters(searched, 'roomRack'), roomRackLabel),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searched, filterModel, filterGroup, filterContract, filterSupplier, filterWarranty, filterRunStatus],
+  )
+  const groupTotals = useMemo(
+    () => countBy(applyColumnFilters(searched, 'group'), (s) => s.responsible_group || '-'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searched, filterModel, filterRoomRack, filterContract, filterSupplier, filterWarranty, filterRunStatus],
+  )
+  const contractTotals = useMemo(
+    () => countBy(applyColumnFilters(searched, 'contract'), contractLabel),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searched, filterModel, filterRoomRack, filterGroup, filterSupplier, filterWarranty, filterRunStatus],
+  )
+  const supplierTotals = useMemo(
+    () => countBy(applyColumnFilters(searched, 'supplier'), supplierLabel),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searched, filterModel, filterRoomRack, filterGroup, filterContract, filterWarranty, filterRunStatus],
+  )
+  const warrantyTotals = useMemo(
+    () => countBy(applyColumnFilters(searched, 'warranty'), warrantyLabel),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searched, filterModel, filterRoomRack, filterGroup, filterContract, filterSupplier, filterRunStatus],
+  )
+  const runStatusTotals = useMemo(
+    () => countBy(applyColumnFilters(searched, 'runStatus'), (s) => s.run_status || '-'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searched, filterModel, filterRoomRack, filterGroup, filterContract, filterSupplier, filterWarranty],
+  )
+
   const visibleIds = useMemo(() => visible.map((s) => s.id), [visible])
   const sel = useSelection(visibleIds)
+
+  const hasColFilters = !!(
+    filterModel || filterRoomRack || filterGroup || filterContract
+    || filterSupplier || filterWarranty || filterRunStatus
+  )
+
+  function setFilter(key, value) {
+    const setters = {
+      model: setFilterModel,
+      roomRack: setFilterRoomRack,
+      group: setFilterGroup,
+      contract: setFilterContract,
+      supplier: setFilterSupplier,
+      warranty: setFilterWarranty,
+      runStatus: setFilterRunStatus,
+    }
+    setters[key]?.(value)
+    sel.clear()
+  }
 
   async function toggle(server) {
     setError('')
@@ -297,6 +432,34 @@ export default function Servers() {
         resultText={
           <>
             显示 <strong>{visible.length}</strong> / {servers.length}
+            {filterModel ? ` · ${filterModel}` : ''}
+            {filterRoomRack ? ` · ${filterRoomRack}` : ''}
+            {filterGroup ? ` · ${filterGroup}` : ''}
+            {filterContract ? ` · ${filterContract}` : ''}
+            {filterSupplier ? ` · ${filterSupplier}` : ''}
+            {filterWarranty ? ` · 维保${filterWarranty}` : ''}
+            {filterRunStatus ? ` · ${filterRunStatus}` : ''}
+            {hasColFilters && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className="linkish"
+                  onClick={() => {
+                    setFilterModel('')
+                    setFilterRoomRack('')
+                    setFilterGroup('')
+                    setFilterContract('')
+                    setFilterSupplier('')
+                    setFilterWarranty('')
+                    setFilterRunStatus('')
+                    sel.clear()
+                  }}
+                >
+                  清除列筛选
+                </button>
+              </>
+            )}
           </>
         }
         selectedCount={sel.selectedCount}
@@ -398,13 +561,69 @@ export default function Servers() {
               />
             </th>
             <th>资产编号</th>
-            <th>型号</th>
-            <th>机房/机柜</th>
-            <th>运维部门</th>
-            <th>合同号</th>
-            <th>供应商</th>
-            <th>维保到位</th>
-            <th>运行状态</th>
+            <HeaderFilter
+              label="型号"
+              value={filterModel}
+              options={sortedKeys(modelTotals)}
+              totals={modelTotals}
+              open={openFilter === 'model'}
+              onToggle={(v) => setOpenFilter(v ? 'model' : '')}
+              onSelect={(v) => setFilter('model', v)}
+            />
+            <HeaderFilter
+              label="机房/机柜"
+              value={filterRoomRack}
+              options={sortedKeys(roomRackTotals)}
+              totals={roomRackTotals}
+              open={openFilter === 'roomRack'}
+              onToggle={(v) => setOpenFilter(v ? 'roomRack' : '')}
+              onSelect={(v) => setFilter('roomRack', v)}
+            />
+            <HeaderFilter
+              label="运维部门"
+              value={filterGroup}
+              options={GROUPS.filter((g) => groupTotals[g] || filterGroup === g)}
+              totals={groupTotals}
+              open={openFilter === 'group'}
+              onToggle={(v) => setOpenFilter(v ? 'group' : '')}
+              onSelect={(v) => setFilter('group', v)}
+            />
+            <HeaderFilter
+              label="合同号"
+              value={filterContract}
+              options={sortedKeys(contractTotals)}
+              totals={contractTotals}
+              open={openFilter === 'contract'}
+              onToggle={(v) => setOpenFilter(v ? 'contract' : '')}
+              onSelect={(v) => setFilter('contract', v)}
+            />
+            <HeaderFilter
+              label="供应商"
+              value={filterSupplier}
+              options={sortedKeys(supplierTotals)}
+              totals={supplierTotals}
+              open={openFilter === 'supplier'}
+              onToggle={(v) => setOpenFilter(v ? 'supplier' : '')}
+              onSelect={(v) => setFilter('supplier', v)}
+            />
+            <HeaderFilter
+              label="维保到位"
+              value={filterWarranty}
+              options={sortedKeys(warrantyTotals)}
+              totals={warrantyTotals}
+              open={openFilter === 'warranty'}
+              onToggle={(v) => setOpenFilter(v ? 'warranty' : '')}
+              onSelect={(v) => setFilter('warranty', v)}
+            />
+            <HeaderFilter
+              label="运行状态"
+              value={filterRunStatus}
+              options={RUN_STATUS_OPTIONS.filter((s) => runStatusTotals[s] || filterRunStatus === s)}
+              totals={runStatusTotals}
+              open={openFilter === 'runStatus'}
+              onToggle={(v) => setOpenFilter(v ? 'runStatus' : '')}
+              onSelect={(v) => setFilter('runStatus', v)}
+            />
             <th>操作</th>
           </tr>
         </thead>
@@ -421,7 +640,7 @@ export default function Servers() {
               </td>
               <td>{s.asset_no}</td>
               <td>{s.model}</td>
-              <td>{s.room} / {s.rack}</td>
+              <td>{roomRackLabel(s)}</td>
               <td>{s.responsible_group}</td>
               <td>{s.contract_no || '-'}</td>
               <td>{s.supplier || '-'}</td>

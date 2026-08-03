@@ -150,7 +150,7 @@ export default function PartDetail() {
               <Field label="采购金额">
                 {part.purchase_amount != null ? String(part.purchase_amount) : '—'}
               </Field>
-              <Field label="采购日期">{part.purchase_date}</Field>
+              <Field label="到货验收日期">{part.purchase_date}</Field>
               <Field label="维保到期">{part.warranty_expiry}</Field>
               <Field label="敏感标记">{part.sensitivity || '无'}</Field>
             </dl>

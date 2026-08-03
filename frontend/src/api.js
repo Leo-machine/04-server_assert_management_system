@@ -75,13 +75,19 @@ export const api = {
   delete: (path) => request(path, { method: 'DELETE' }),
 }
 
-// CSV 下载（模板/导出共用）：拉取文本 → 触发浏览器下载
-export async function downloadCsv(path, filename) {
-  const text = await request(path)
-  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' })
+/** 触发 CSV 文件下载 */
+export async function downloadCsv(url, fallbackName = 'export.csv') {
+  const token = getToken()
+  const res = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`下载失败: ${res.status}`)
+  const blob = await res.blob()
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
-  a.download = filename
+  const disp = res.headers.get('Content-Disposition') || ''
+  const m = disp.match(/filename="?(.+?)"?$/i)
+  a.download = m?.[1] || fallbackName
   a.click()
   URL.revokeObjectURL(a.href)
 }

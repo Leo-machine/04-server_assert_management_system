@@ -539,6 +539,539 @@ a:hover { text-decoration: underline; }
   padding-left: 1rem;
 }
 
+/* ==================== PartDetail 配件详情页 ==================== */
+.pd-page {
+  max-width: 900px;
+}
+
+.pd-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.pd-kicker {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 0.15rem;
+}
+
+.pd-header h2 {
+  margin: 0;
+  font-size: 1.3rem;
+  color: #003e7e;
+  font-weight: 700;
+}
+
+.pd-badges {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.pd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #eef2f6;
+}
+
+.pd-action {
+  display: inline-block;
+  padding: 0.4rem 0.85rem;
+  border-radius: 4px;
+  border: 1px solid #005a9c;
+  background: #005a9c;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.pd-action:hover {
+  background: #003e7e;
+  text-decoration: none;
+  color: #fff;
+}
+
+.pd-section {
+  margin-bottom: 1.25rem;
+}
+
+.pd-section h3 {
+  font-size: 0.92rem;
+  color: #003e7e;
+  font-weight: 600;
+  margin: 0 0 0.6rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid #eef2f6;
+}
+
+.pd-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.pd-section-head h3 {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.pd-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.5rem 1.25rem;
+  margin: 0;
+}
+
+.pd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.pd-field dt {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.pd-field dd {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #1e293b;
+}
+
+/* ==================== HeaderFilter 表头筛选 ==================== */
+.pl-th-filter {
+  position: relative;
+}
+
+.pl-th-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.pl-th-btn:hover { color: #003e7e; }
+
+.pl-th-val {
+  font-style: normal;
+  color: #005a9c;
+  background: #eff6ff;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+}
+
+.pl-th-caret {
+  font-size: 0.55rem;
+  color: #94a3b8;
+}
+
+.is-filtered .pl-th-btn { color: #005a9c; }
+
+.pl-th-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 50;
+  min-width: 140px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+  padding: 0.3rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.pl-th-menu button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.8rem;
+  border: none;
+  background: none;
+  color: #334155;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.pl-th-menu button:hover { background: #f1f5f9; }
+.pl-th-menu button.is-on { background: #eff6ff; color: #005a9c; font-weight: 600; }
+.pl-th-menu button em { font-size: 0.72rem; color: #94a3b8; font-style: normal; }
+.pl-th-menu button.is-on em { color: #005a9c; }
+
+/* ==================== ImportWizard 批量导入向导 ==================== */
+.import-wizard {
+  padding: 0.5rem 0;
+}
+
+.import-report table {
+  font-size: 0.82rem;
+}
+
+.import-report th,
+.import-report td {
+  padding: 0.35rem 0.45rem;
+}
+
+.import-cell-err {
+  background: #fff5f5;
+  color: #c62828;
+  font-weight: 600;
+}
+
+.import-err-list {
+  margin: 0;
+  padding-left: 0.9rem;
+  font-size: 0.75rem;
+  color: #c62828;
+}
+
+tr.is-invalid td {
+  background: #fffafa;
+}
+
+/* ==================== 审批中心卡片 ==================== */
+.ap-card {
+  background: #fff;
+  border: 1px solid #e3e9f0;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-top: 0.75rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}
+
+.ap-card-header {
+  margin-bottom: 0.85rem;
+}
+
+.ap-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
+
+.ap-id {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #003e7e;
+}
+
+.ap-type {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+  background: #f1f5f9;
+  padding: 0.15rem 0.55rem;
+  border-radius: 4px;
+}
+
+.ap-status {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.ap-status-pending { background: #eff6ff; color: #1d4ed8; }
+.ap-status-approved { background: #ecfdf5; color: #0f766e; }
+.ap-status-rejected { background: #fef2f2; color: #b91c1c; }
+.ap-status-withdrawn { background: #f8fafc; color: #64748b; }
+
+.ap-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.8rem;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+/* 审批步骤条 */
+.ap-steps {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  padding: 0.75rem 0.25rem;
+  margin-bottom: 0.25rem;
+  overflow-x: auto;
+}
+
+.ap-step-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  min-width: 80px;
+  flex: 1;
+  text-align: center;
+}
+
+.ap-step-dot {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  z-index: 1;
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
+.ap-step-ok { background: #0f766e; color: #fff; }
+.ap-step-no { background: #b91c1c; color: #fff; }
+.ap-step-current { box-shadow: 0 0 0 3px rgba(0,90,156,0.3); }
+
+.ap-step-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #334155;
+  margin-top: 0.35rem;
+}
+
+.ap-step-status {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  margin-top: 0.1rem;
+}
+
+.ap-step-opinion {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-style: italic;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-step-line {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  width: 100%;
+  height: 2px;
+  background: #e2e8f0;
+  z-index: 0;
+}
+
+.ap-step-line.is-done { background: #0f766e; }
+
+/* 审批操作按钮 */
+.ap-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #f1f5f9;
+}
+
+.ap-btn-approve {
+  background: #0f766e !important;
+  border-color: #0f766e !important;
+  font-weight: 600;
+}
+.ap-btn-approve:hover { background: #0a5c55 !important; }
+
+.ap-btn-reject {
+  background: #fff !important;
+  color: #b91c1c !important;
+  border-color: #fca5a5 !important;
+  font-weight: 600;
+}
+.ap-btn-reject:hover { background: #fef2f2 !important; }
+
+.ap-btn-withdraw {
+  background: #fff !important;
+  color: #64748b !important;
+  border-color: #e2e8f0 !important;
+}
+.ap-btn-withdraw:hover { background: #f8fafc !important; border-color: #94a3b8 !important; }
+
+/* ==================== 设备履历时间线 ==================== */
+.hz-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin: 0.5rem 0 1.25rem;
+}
+
+.hz-header-left h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #003e7e;
+  font-weight: 700;
+}
+
+.hz-kicker {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 0.1rem;
+}
+
+.hz-header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.hz-timeline {
+  position: relative;
+  padding-left: 0;
+}
+
+.hz-node-wrap {
+  display: grid;
+  grid-template-columns: 120px 40px 1fr;
+  gap: 0;
+  min-height: 80px;
+}
+
+.hz-time {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  padding-top: 0.65rem;
+  text-align: right;
+  padding-right: 0.75rem;
+  white-space: nowrap;
+}
+
+.hz-node-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.hz-node-dot {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  flex-shrink: 0;
+  margin-top: 0.55rem;
+}
+
+.hz-node-dot span {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.hz-node-line {
+  width: 2px;
+  flex: 1;
+  background: #e2e8f0;
+  min-height: 20px;
+  margin-top: 4px;
+}
+
+.hz-card {
+  background: #fff;
+  border: 1px solid #eef2f6;
+  border-radius: 6px;
+  padding: 0.75rem 0.9rem;
+  margin: 0.55rem 0 0.5rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}
+
+.hz-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+
+.hz-event {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.hz-operator {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.hz-flow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.3rem;
+}
+
+.hz-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.hz-badge-from { background: #f1f5f9; color: #64748b; }
+.hz-badge-none { background: #f8fafc; color: #94a3b8; border: 1px dashed #e2e8f0; }
+.hz-badge-to { background: #eff6ff; color: #1d4ed8; }
+
+.hz-arrow {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.hz-loc-change {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  margin-bottom: 0.2rem;
+}
+
+.hz-extras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.8rem;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.hz-remark {
+  color: #64748b;
+  font-style: italic;
+}
+
 /* ==================== 表格 ==================== */
 table {
   width: 100%;

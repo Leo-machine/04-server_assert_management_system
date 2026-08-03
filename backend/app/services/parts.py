@@ -130,7 +130,7 @@ def inbound(
             ("合同号", contract_no),
             ("所属项目", project),
             ("产权单位", owner_unit),
-            ("采购日期", purchase_date),
+            ("到货验收日期", purchase_date),
             ("维保到位时间", warranty_expiry),
         ):
             if val is None or (isinstance(val, str) and not val.strip()):
