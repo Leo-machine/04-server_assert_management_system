@@ -8,3 +8,4 @@ frontend/dist/
 .workbuddy/
 .DS_Store
 *.pyc
+frontend/log.webp

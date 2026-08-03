@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 from app import enums
 from app.services.stocktake import assert_stocktake_read_only_red_line
-from tests.conftest import op_headers
+from tests.conftest import demo_cast, op_headers
 
 
 def _stock_part(client):
@@ -34,8 +34,9 @@ def _org(client):
 
 
 def _loan_part_via_mainline(client, part_id: int) -> None:
-    users = _users(client)
-    applicant, a1, a2, a3 = users[0], users[1], users[2], users[3]
+    cast = demo_cast(client)
+    users = cast["users"]
+    applicant, a1, a2, a3 = cast["applicant"], cast["a1"], cast["a2"], cast["a3"]
     org = _org(client)
     approval_id = client.post(
         "/api/approvals/loan",

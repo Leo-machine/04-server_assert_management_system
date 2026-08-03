@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -21,6 +21,13 @@ def db_session():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
@@ -54,4 +61,32 @@ def client(db_session):
 
 
 def op_headers(user_id: int) -> dict:
-    return {"X-Operator-Id": str(user_id)}
+    """测试登录态：铸造真实签名令牌（业务接口已不再接受 X-Operator-Id）。"""
+    from app.deps import make_token
+
+    class _U:
+        id = user_id
+
+    return {"Authorization": f"Bearer {make_token(_U())}"}
+
+
+def demo_cast(client) -> dict:
+    """按姓名取演示角色，避免种子顺序变化导致下标错位。"""
+    by_name = {u["name"]: u for u in client.get("/api/users").json()}
+    required = ("张运维", "李组长", "王主管", "赵经理", "钱仓管")
+    missing = [n for n in required if n not in by_name]
+    assert not missing, f"种子用户缺失: {missing}"
+    return {
+        "applicant": by_name["张运维"],
+        "a1": by_name["李组长"],
+        "a2": by_name["王主管"],
+        "a3": by_name["赵经理"],
+        "other": by_name["钱仓管"],
+        "admin": by_name.get("admin"),
+        "approver_ids": [
+            by_name["李组长"]["id"],
+            by_name["王主管"]["id"],
+            by_name["赵经理"]["id"],
+        ],
+        "users": list(by_name.values()),
+    }

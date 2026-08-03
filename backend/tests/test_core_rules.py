@@ -6,7 +6,7 @@ from sqlalchemy import inspect
 
 from app import enums
 from app.seed import assert_no_movement_mutation_api
-from tests.conftest import op_headers
+from tests.conftest import demo_cast, op_headers
 
 
 def _stock_part_id(client) -> int:
@@ -63,6 +63,7 @@ def test_live_server_blocks_uninstall(client):
     patch = client.patch(
         f"/api/servers/{server_id}/run-status",
         json={"run_status": enums.RUN_NOT_LIVE},
+        headers=op_headers(1),
     )
     assert patch.status_code == 200
     r2 = client.post(
@@ -76,8 +77,9 @@ def test_live_server_blocks_uninstall(client):
 
 def test_loan_requires_full_approval(client):
     part_id = _stock_part_id(client)
-    users = _users(client)
-    applicant, a1, a2, a3 = users[0], users[1], users[2], users[3]
+    cast = demo_cast(client)
+    users = cast["users"]
+    applicant, a1, a2, a3 = cast["applicant"], cast["a1"], cast["a2"], cast["a3"]
     org = _org(client)
 
     create = client.post(
@@ -107,8 +109,9 @@ def test_loan_requires_full_approval(client):
 
 def test_stepwise_and_veto(client):
     part_id = _stock_part_id(client)
-    users = _users(client)
-    applicant, a1, a2, a3 = users[0], users[1], users[2], users[3]
+    cast = demo_cast(client)
+    users = cast["users"]
+    applicant, a1, a2, a3 = cast["applicant"], cast["a1"], cast["a2"], cast["a3"]
     org = _org(client)
 
     approval_id = client.post(
@@ -147,8 +150,9 @@ def test_stepwise_and_veto(client):
 
 def test_approval_recusal(client):
     part_id = _stock_part_id(client)
-    users = _users(client)
-    applicant = users[0]
+    cast = demo_cast(client)
+    users = cast["users"]
+    applicant = cast["applicant"]
     org = _org(client)
 
     r = client.post(
@@ -157,7 +161,7 @@ def test_approval_recusal(client):
             "part_id": part_id,
             "dest_org_id": org["id"],
             "expected_return_date": str(date.today() + timedelta(days=7)),
-            "approver_ids": [applicant["id"], users[1]["id"], users[2]["id"]],
+            "approver_ids": [applicant["id"], cast["a1"]["id"], cast["a2"]["id"]],
         },
         headers=op_headers(applicant["id"]),
     )
@@ -170,7 +174,7 @@ def test_approval_recusal(client):
             "part_id": part_id,
             "dest_org_id": org["id"],
             "expected_return_date": str(date.today() + timedelta(days=7)),
-            "approver_ids": [users[1]["id"], users[1]["id"], users[2]["id"]],
+            "approver_ids": [cast["a1"]["id"], cast["a1"]["id"], cast["a2"]["id"]],
         },
         headers=op_headers(applicant["id"]),
     )
@@ -178,18 +182,43 @@ def test_approval_recusal(client):
     assert "互不相同" in r2.json()["detail"]
 
 
-def test_expected_return_date_required(client):
+def test_operator_cannot_be_approver(client):
+    """操作员角色不能担任审批人。"""
     part_id = _stock_part_id(client)
-    users = _users(client)
+    cast = demo_cast(client)
+    users = cast["users"]
+    assert cast["applicant"]["role"] == "操作员"
+    assert cast["other"]["role"] == "操作员"
+    assert cast["a1"]["role"] == "审批人"
     org = _org(client)
     r = client.post(
         "/api/approvals/loan",
         json={
             "part_id": part_id,
             "dest_org_id": org["id"],
-            "approver_ids": [users[1]["id"], users[2]["id"], users[3]["id"]],
+            "expected_return_date": str(date.today() + timedelta(days=7)),
+            # other=钱仓管 为操作员
+            "approver_ids": [cast["a1"]["id"], cast["a2"]["id"], cast["other"]["id"]],
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
+    )
+    assert r.status_code == 400
+    assert "审批人" in r.json()["detail"]
+
+
+def test_expected_return_date_required(client):
+    part_id = _stock_part_id(client)
+    cast = demo_cast(client)
+    users = cast["users"]
+    org = _org(client)
+    r = client.post(
+        "/api/approvals/loan",
+        json={
+            "part_id": part_id,
+            "dest_org_id": org["id"],
+            "approver_ids": cast["approver_ids"],
+        },
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 422
 
@@ -221,13 +250,14 @@ def test_append_only_and_replay(client, db_session):
 
 def test_non_designated_approver_rejected(client):
     part_id = _stock_part_id(client)
-    users = _users(client)
+    cast = demo_cast(client)
+    users = cast["users"]
     applicant, a1, a2, a3, other = (
-        users[0],
-        users[1],
-        users[2],
-        users[3],
-        users[4],
+        cast["applicant"],
+        cast["a1"],
+        cast["a2"],
+        cast["a3"],
+        cast["other"],
     )
     org = _org(client)
     approval_id = client.post(
@@ -241,19 +271,29 @@ def test_non_designated_approver_rejected(client):
         headers=op_headers(applicant["id"]),
     ).json()["id"]
 
+    # 操作员角色：被角色门禁 403 拦截（先于此级指定人校验）
     r = client.post(
         f"/api/approvals/{approval_id}/decide",
         json={"level": 1, "approve": True},
         headers=op_headers(other["id"]),
     )
-    assert r.status_code == 400
-    assert "指定审批人" in r.json()["detail"]
+    assert r.status_code == 403
+
+    # 审批人角色但非本级指定人：400
+    r2 = client.post(
+        f"/api/approvals/{approval_id}/decide",
+        json={"level": 1, "approve": True},
+        headers=op_headers(cast["admin"]["id"]),
+    )
+    assert r2.status_code == 400
+    assert "指定审批人" in r2.json()["detail"]
 
 
 def test_revalidate_in_stock_before_loan_movement(client):
     part_id = _stock_part_id(client)
-    users = _users(client)
-    applicant, a1, a2, a3 = users[0], users[1], users[2], users[3]
+    cast = demo_cast(client)
+    users = cast["users"]
+    applicant, a1, a2, a3 = cast["applicant"], cast["a1"], cast["a2"], cast["a3"]
     org = _org(client)
     server_id = _idle_server(client)
 
@@ -304,8 +344,9 @@ def test_revalidate_in_stock_before_loan_movement(client):
 
 def test_illegal_start_status_install_on_loaned(client):
     part_id = _stock_part_id(client)
-    users = _users(client)
-    applicant, a1, a2, a3 = users[0], users[1], users[2], users[3]
+    cast = demo_cast(client)
+    users = cast["users"]
+    applicant, a1, a2, a3 = cast["applicant"], cast["a1"], cast["a2"], cast["a3"]
     org = _org(client)
     server_id = _idle_server(client)
 
@@ -341,8 +382,9 @@ def test_illegal_start_status_install_on_loaned(client):
 
 def test_happy_path_full_loan_and_return(client):
     part_id = _stock_part_id(client)
-    users = _users(client)
-    applicant, a1, a2, a3 = users[0], users[1], users[2], users[3]
+    cast = demo_cast(client)
+    users = cast["users"]
+    applicant, a1, a2, a3 = cast["applicant"], cast["a1"], cast["a2"], cast["a3"]
     org = _org(client)
     loc_id = _locs(client)[0]["id"]
     expected = date.today() + timedelta(days=14)

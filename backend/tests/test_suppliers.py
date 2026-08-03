@@ -25,7 +25,7 @@ def test_supplier_crud_and_rename_cascade(client):
             "model_id": mem["id"],
             "fixed_asset_no": "FA-SUP-TEST-1",
             "storage_location_id": locs[0]["id"],
-            "source_type": "单独合同",
+            "source_type": "独立合同采购",
             "responsible_group": "基础组",
             "serial_no": "SN-SUP-TEST-1",
             "contract_no": "HT-SUP-TEST",

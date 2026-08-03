@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { api, getOperatorId } from '../api'
+import { api } from '../api'
+import ApproverSelects, { useDefaultApprovers } from '../components/ApproverSelects'
 
 export default function Loan() {
   const { id } = useParams()
@@ -8,11 +9,9 @@ export default function Loan() {
   const [part, setPart] = useState(null)
   const [orgs, setOrgs] = useState([])
   const [users, setUsers] = useState([])
+  const [approvers, setApprovers] = useDefaultApprovers(users)
   const [orgId, setOrgId] = useState('')
   const [date, setDate] = useState('')
-  const [a1, setA1] = useState('')
-  const [a2, setA2] = useState('')
-  const [a3, setA3] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -25,11 +24,6 @@ export default function Loan() {
       setOrgs(o)
       setUsers(u)
       setOrgId(String(o[0]?.id || ''))
-      const op = getOperatorId()
-      const others = u.filter((x) => x.id !== op)
-      setA1(String(others[0]?.id || ''))
-      setA2(String(others[1]?.id || ''))
-      setA3(String(others[2]?.id || ''))
       const d = new Date()
       d.setDate(d.getDate() + 14)
       setDate(d.toISOString().slice(0, 10))
@@ -39,21 +33,23 @@ export default function Loan() {
   async function onSubmit(e) {
     e.preventDefault()
     setError('')
+    const ids = approvers.map(Number)
+    if (ids.some((n) => !n) || new Set(ids).size !== 3) {
+      setError('请选择三位互不相同的审批人（须为审批人/管理员角色）')
+      return
+    }
     try {
       await api.post('/approvals/loan', {
         part_id: Number(id),
         dest_org_id: Number(orgId),
         expected_return_date: date,
-        approver_ids: [Number(a1), Number(a2), Number(a3)],
+        approver_ids: ids,
       })
       nav('/approvals')
     } catch (err) {
       setError(err.message)
     }
   }
-
-  const operatorId = getOperatorId()
-  const candidates = users.filter((u) => u.id !== operatorId)
 
   return (
     <div className="panel">
@@ -66,7 +62,7 @@ export default function Loan() {
           {part.fixed_asset_no} · 当前状态 {part.current_status}
         </p>
       )}
-      <p className="muted">申请人 = 当前操作人；不得出现在审批人中；三级审批人须互不相同。</p>
+      <p className="muted">申请人 = 当前登录用户；不得出现在审批人中；三级审批人须互不相同。</p>
       {error && <div className="error">{error}</div>}
       <form onSubmit={onSubmit}>
         <label>
@@ -81,30 +77,7 @@ export default function Loan() {
           预期归还日（必填）
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
         </label>
-        <label>
-          一级审批人
-          <select value={a1} onChange={(e) => setA1(e.target.value)} required>
-            {candidates.map((u) => (
-              <option key={u.id} value={u.id}>{u.name}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          二级审批人
-          <select value={a2} onChange={(e) => setA2(e.target.value)} required>
-            {candidates.map((u) => (
-              <option key={u.id} value={u.id}>{u.name}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          三级审批人
-          <select value={a3} onChange={(e) => setA3(e.target.value)} required>
-            {candidates.map((u) => (
-              <option key={u.id} value={u.id}>{u.name}</option>
-            ))}
-          </select>
-        </label>
+        <ApproverSelects users={users} value={approvers} onChange={setApprovers} />
         <button type="submit">提交审批</button>
       </form>
     </div>

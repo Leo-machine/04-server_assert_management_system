@@ -33,11 +33,16 @@ export default function Transfer() {
   async function onSubmit(e) {
     e.preventDefault()
     setError('')
+    const ids = approvers.map(Number)
+    if (ids.some((n) => !n) || new Set(ids).size !== 3) {
+      setError('请选择三位互不相同的审批人（须为审批人/管理员角色）')
+      return
+    }
     try {
       await api.post('/approvals/transfer', {
         part_id: Number(id),
         dest_org_id: Number(orgId),
-        approver_ids: approvers.map(Number),
+        approver_ids: ids,
         reason_code: reasonCode || null,
         remark: remark || null,
       })

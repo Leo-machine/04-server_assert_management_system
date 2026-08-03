@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api } from '../api'
+import { api, getStoredUser } from '../api'
 
 const ALL_CATEGORIES = [
   '内存', '机械硬盘', '固态硬盘', 'RAID卡',
@@ -29,6 +29,7 @@ export default function Locations() {
   const [editingId, setEditingId] = useState(null)
   const [error, setError] = useState('')
   const [ok, setOk] = useState('')
+  const isAdmin = getStoredUser()?.role === '管理员'
 
   async function load() {
     const [locs, dist] = await Promise.all([
@@ -173,66 +174,70 @@ export default function Locations() {
       </div>
 
       <div className="split-layout" style={{ marginTop: '1.25rem' }}>
-        <form onSubmit={onSubmit}>
-          <fieldset>
-            <legend>{editingId ? `编辑 #${editingId}` : '新增存放位置'}</legend>
-            <label>
-              区域 *
-              <input
-                value={form.warehouse}
-                onChange={(e) => setForm({ ...form, warehouse: e.target.value })}
-                required
-                placeholder="如：一号库房 / A栋数据中心"
-              />
-            </label>
-            <label>
-              位置 *
-              <input
-                value={form.slot}
-                onChange={(e) => setForm({ ...form, slot: e.target.value })}
-                required
-                placeholder="如：A-01 / Rack-B-03"
-              />
-            </label>
-            <label>
-              位置类型
-              <select
-                value={form.location_type}
-                onChange={(e) => setForm({ ...form, location_type: e.target.value })}
-              >
-                <option value="">— 通用（不区分） —</option>
-                {LOCATION_TYPES.map((t) => (
-                  <option key={t} value={t}>{TYPE_ICONS[t]} {t}</option>
-                ))}
-              </select>
-            </label>
-            <div>
-              <div className="muted" style={{ marginBottom: 6 }}>
-                允许入库的配件类型（不选 = 通用，所有类型可入）
+        {isAdmin ? (
+          <form onSubmit={onSubmit}>
+            <fieldset>
+              <legend>{editingId ? `编辑 #${editingId}` : '新增存放位置'}</legend>
+              <label>
+                区域 *
+                <input
+                  value={form.warehouse}
+                  onChange={(e) => setForm({ ...form, warehouse: e.target.value })}
+                  required
+                  placeholder="如：一号库房 / A栋数据中心"
+                />
+              </label>
+              <label>
+                位置 *
+                <input
+                  value={form.slot}
+                  onChange={(e) => setForm({ ...form, slot: e.target.value })}
+                  required
+                  placeholder="如：A-01 / Rack-B-03"
+                />
+              </label>
+              <label>
+                位置类型
+                <select
+                  value={form.location_type}
+                  onChange={(e) => setForm({ ...form, location_type: e.target.value })}
+                >
+                  <option value="">— 通用（不区分） —</option>
+                  {LOCATION_TYPES.map((t) => (
+                    <option key={t} value={t}>{TYPE_ICONS[t]} {t}</option>
+                  ))}
+                </select>
+              </label>
+              <div>
+                <div className="muted" style={{ marginBottom: 6 }}>
+                  允许入库的配件类型（不选 = 通用，所有类型可入）
+                </div>
+                <div className="chip-row" style={{ margin: '0 0 0.5rem' }}>
+                  {ALL_CATEGORIES.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      className={`chip ${form.allowed_categories.includes(cat) ? 'active' : ''}`}
+                      onClick={() => toggleCat(cat)}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="chip-row" style={{ margin: '0 0 0.5rem' }}>
-                {ALL_CATEGORIES.map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    className={`chip ${form.allowed_categories.includes(cat) ? 'active' : ''}`}
-                    onClick={() => toggleCat(cat)}
-                  >
-                    {cat}
+              <div className="row-actions">
+                <button type="submit">{editingId ? '保存' : '新增'}</button>
+                {editingId && (
+                  <button type="button" className="secondary" onClick={resetForm}>
+                    取消
                   </button>
-                ))}
+                )}
               </div>
-            </div>
-            <div className="row-actions">
-              <button type="submit">{editingId ? '保存' : '新增'}</button>
-              {editingId && (
-                <button type="button" className="secondary" onClick={resetForm}>
-                  取消
-                </button>
-              )}
-            </div>
-          </fieldset>
-        </form>
+            </fieldset>
+          </form>
+        ) : (
+          <p className="muted">库位增删改仅管理员可操作；下方为只读列表与分布。</p>
+        )}
 
         <div>
           <h3 style={{ marginTop: 0 }}>位置列表（{locations.length}）</h3>
@@ -244,7 +249,7 @@ export default function Locations() {
                 <th>类型</th>
                 <th>允许配件</th>
                 <th>存放数</th>
-                <th>操作</th>
+                {isAdmin && <th>操作</th>}
               </tr>
             </thead>
             <tbody>
@@ -261,21 +266,23 @@ export default function Locations() {
                     {loc.allowed_categories?.length ? loc.allowed_categories.join('、') : '通用'}
                   </td>
                   <td><span className="badge ok">{loc.part_count || 0}</span></td>
-                  <td>
-                    <div className="row-actions">
-                      <button type="button" className="secondary" onClick={() => startEdit(loc)}>
-                        编辑
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={(loc.part_count || 0) > 0}
-                        onClick={() => onDelete(loc)}
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </td>
+                  {isAdmin && (
+                    <td>
+                      <div className="row-actions">
+                        <button type="button" className="secondary" onClick={() => startEdit(loc)}>
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={(loc.part_count || 0) > 0}
+                          onClick={() => onDelete(loc)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

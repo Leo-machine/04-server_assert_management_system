@@ -27,12 +27,15 @@ def seed_if_empty(db: Session) -> None:
     if db.scalars(select(User).limit(1)).first() is not None:
         return
 
+    import hashlib
+    pw = hashlib.sha256("123456".encode()).hexdigest()
     users = [
-        User(name="张运维", role_label="运维"),
-        User(name="李组长", role_label="组长"),
-        User(name="王主管", role_label="主管"),
-        User(name="赵经理", role_label="经理"),
-        User(name="钱仓管", role_label="仓管"),
+        User(username="admin", name="admin", role_label="管理员", role=enums.ROLE_ADMIN, password_hash=pw),
+        User(username="zhangyw", name="张运维", role_label="运维", role=enums.ROLE_OPERATOR, password_hash=pw),
+        User(username="lizz", name="李组长", role_label="组长", role=enums.ROLE_APPROVER, password_hash=pw),
+        User(username="wangzg", name="王主管", role_label="主管", role=enums.ROLE_APPROVER, password_hash=pw),
+        User(username="zhaojl", name="赵经理", role_label="经理", role=enums.ROLE_APPROVER, password_hash=pw),
+        User(username="qiancg", name="钱仓管", role_label="仓管", role=enums.ROLE_OPERATOR, password_hash=pw),
     ]
     db.add_all(users)
     db.flush()
@@ -143,6 +146,13 @@ def seed_if_empty(db: Session) -> None:
             u_position="10U",
             responsible_group="基础组",
             run_status=enums.RUN_LIVE,
+            supplier="浪潮信息",
+            contract_no="HT-2025-100",
+            project="2025年基础资源扩容",
+            owner_unit="本单位信息中心",
+            warranty_expiry=date(2028, 6, 30),
+            arrival_date=date(2025, 7, 1),
+            purchase_amount=Decimal("185000.00"),
         ),
         Server(
             asset_no="SRV-IDLE-002",
@@ -152,6 +162,13 @@ def seed_if_empty(db: Session) -> None:
             u_position="20U",
             responsible_group="运营组",
             run_status=enums.RUN_NOT_LIVE,
+            supplier="戴尔（中国）",
+            contract_no="HT-2026-015",
+            project="2026年平台组资源池",
+            owner_unit="本单位信息中心",
+            warranty_expiry=date(2029, 1, 31),
+            arrival_date=date(2026, 2, 10),
+            purchase_amount=Decimal("162000.00"),
         ),
     ]
     db.add_all(servers)
@@ -175,7 +192,7 @@ def seed_if_empty(db: Session) -> None:
             model_id=models[0].id,
             fixed_asset_no="FA-MEM-1001",
             serial_no="SN-MEM-1001",
-            source_type="单独合同",
+            source_type="独立合同采购",
             contract_no="HT-2026-001",
             purchase_amount=Decimal("800.00"),
             purchase_date=date(2026, 1, 10),
@@ -193,7 +210,7 @@ def seed_if_empty(db: Session) -> None:
             model_id=models[5].id,  # 光模块
             fixed_asset_no="FA-OPT-3001",
             serial_no="SN-OPT-3001",
-            source_type="随器采购",
+            source_type="服务器原装",
             responsible_group="网络组",
             owner_unit=enums.HOME_OWNER_UNIT,
             allocatable_flag=enums.ALLOC_GENERAL,
@@ -205,7 +222,7 @@ def seed_if_empty(db: Session) -> None:
             model_id=models[0].id,
             fixed_asset_no="FA-MEM-1002",
             serial_no="SN-MEM-1002",
-            source_type="单独合同",
+            source_type="独立合同采购",
             responsible_group="基础组",
             owner_unit=enums.HOME_OWNER_UNIT,
             allocatable_flag=enums.ALLOC_RESERVED,  # 保留，不计入可调余量
@@ -217,7 +234,7 @@ def seed_if_empty(db: Session) -> None:
             model_id=models[1].id,  # 海力士同规格，跨型号聚合
             fixed_asset_no="FA-MEM-2001",
             serial_no="SN-MEM-2001",
-            source_type="单独合同",
+            source_type="独立合同采购",
             responsible_group="基础组",
             owner_unit=enums.HOME_OWNER_UNIT,
             allocatable_flag=enums.ALLOC_GENERAL,
@@ -229,7 +246,7 @@ def seed_if_empty(db: Session) -> None:
             model_id=models[0].id,
             fixed_asset_no="FA-MEM-1004",
             serial_no="SN-MEM-1004",
-            source_type="单独合同",
+            source_type="独立合同采购",
             responsible_group="基础组",
             owner_unit="外单位托管资产",  # 非本单位，不计入
             allocatable_flag=enums.ALLOC_GENERAL,
@@ -261,7 +278,7 @@ def seed_if_empty(db: Session) -> None:
         model_id=models[8].id,  # 算力卡
         fixed_asset_no="FA-GPU-2001",
         serial_no="SN-GPU-2001",
-        source_type="单独合同",
+        source_type="独立合同采购",
         contract_no="HT-2025-088",
         purchase_amount=Decimal("120000.00"),
         purchase_date=date(2025, 6, 1),
@@ -313,7 +330,7 @@ def seed_if_empty(db: Session) -> None:
         model_id=models[0].id,
         fixed_asset_no="FA-MEM-1003",
         serial_no="SN-MEM-1003",
-        source_type="随器采购",
+        source_type="服务器原装",
         responsible_group="运营组",
         owner_unit=enums.HOME_OWNER_UNIT,
         allocatable_flag=enums.ALLOC_GENERAL,

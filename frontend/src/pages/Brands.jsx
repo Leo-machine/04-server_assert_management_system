@@ -13,6 +13,7 @@ const ALL_CATEGORIES = [
   '网卡',
   'HBA卡',
   '算力卡',
+  '服务器',
 ]
 
 const emptyForm = { name: '', categories: [] }

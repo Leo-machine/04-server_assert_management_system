@@ -30,55 +30,42 @@ def inbound(
     operator_id: int,
     model_id: int,
     fixed_asset_no: str,
-    storage_location_id: int,
     source_type: str,
-    responsible_group: str,
-    serial_no: str,
-    contract_no: str,
-    purchase_amount: Decimal,
-    purchase_date: date,
-    sensitivity: str,
-    supplier: str,
-    project: str,
-    owner_unit: str,
-    warranty_expiry: date,
     allocatable_flag: str,
     remark: str,
+    serial_no: str,
+    purchase_amount: Decimal,
+    storage_location_id: Optional[int] = None,
+    server_id: Optional[int] = None,
+    responsible_group: Optional[str] = None,
+    contract_no: Optional[str] = None,
+    purchase_date: Optional[date] = None,
+    supplier: Optional[str] = None,
+    project: Optional[str] = None,
+    owner_unit: Optional[str] = None,
+    warranty_expiry: Optional[date] = None,
+    sensitivity: Optional[str] = None,
 ) -> Part:
-    # ---- 全部字段非空校验 ----
+    # ---- 通用校验 ----
     if not fixed_asset_no.strip():
         raise BusinessError("固定资产编号必填")
     if not serial_no.strip():
-        raise BusinessError("厂商序列号 SN 必填")
+        raise BusinessError("设备序列（SN）号必填")
     if source_type not in enums.SOURCE_TYPES:
         raise BusinessError(f"非法 source_type: {source_type}")
-    if responsible_group not in enums.RESPONSIBLE_GROUPS:
-        raise BusinessError(f"非法 responsible_group: {responsible_group}")
-    if not supplier.strip():
-        raise BusinessError("供应商必填")
-    if not contract_no.strip():
-        raise BusinessError("合同号必填")
-    if not project.strip():
-        raise BusinessError("所属项目必填")
-    owner = owner_unit.strip()
-    if not owner:
-        raise BusinessError("产权单位必填")
+    if allocatable_flag not in enums.ALLOCATABLE_FLAGS:
+        raise BusinessError(
+            f"非法 allocatable_flag: {allocatable_flag}，"
+            f"允许：{' / '.join(enums.ALLOCATABLE_FLAGS)}"
+        )
     if not remark.strip():
         raise BusinessError("备注必填")
-    if sensitivity not in enums.SENSITIVITY_VALUES:
-        raise BusinessError(
-            f"非法 sensitivity: {sensitivity}，允许：{' / '.join(enums.SENSITIVITY_VALUES)}"
-        )
-
-    flag = allocatable_flag
-    if flag not in enums.ALLOCATABLE_FLAGS:
-        raise BusinessError(
-            f"非法 allocatable_flag: {flag}，允许：{' / '.join(enums.ALLOCATABLE_FLAGS)}"
-        )
 
     model = db.get(PartModel, model_id)
     if model is None:
         raise BusinessError("型号不存在")
+    if model.category == "服务器":
+        raise BusinessError("服务器整机请走「服务器管理」建档，不走配件入库")
     # 入库前确认型号规格仍符合类型定义（保证数据可用）
     from ..category_specs import SpecValidationError, validate_and_normalize_spec
 
@@ -86,39 +73,101 @@ def inbound(
         validate_and_normalize_spec(model.category, model.spec)
     except SpecValidationError as e:
         raise BusinessError(f"所选型号规格不完整，请先在型号管理中补全：{e.message}") from e
-    loc = db.get(StorageLocation, storage_location_id)
-    if loc is None:
-        raise BusinessError("库位不存在")
-    allowed = loc.allowed_categories or []
-    if allowed and model.category not in allowed:
-        raise BusinessError(
-            f"库位「{loc.warehouse}/{loc.slot}」仅允许："
-            f"{' / '.join(allowed)}，当前型号类型为「{model.category}」"
-        )
+
     exists = db.scalars(
         select(Part).where(Part.fixed_asset_no == fixed_asset_no)
     ).first()
     if exists:
         raise BusinessError(f"固定资产编号已存在: {fixed_asset_no}")
 
+    # ---- 按来源分流 ----
+    if source_type == enums.SOURCE_ORIGINAL:
+        # 服务器原装：合同/产权/供应商/部门由服务器档案带出；配件直接在装（在用）
+        if server_id is None:
+            raise BusinessError("服务器原装入库必须选择关联服务器")
+        server = db.get(Server, server_id)
+        if server is None:
+            raise BusinessError("关联服务器不存在")
+        missing = []
+        if not (server.supplier or "").strip():
+            missing.append("供应商")
+        if not (server.contract_no or "").strip():
+            missing.append("合同号")
+        if not (server.responsible_group or "").strip():
+            missing.append("运维部门")
+        if missing:
+            raise BusinessError(
+                f"服务器「{server.asset_no}」档案缺少：{'、'.join(missing)}，"
+                f"请先在服务器管理中补全后再入库"
+            )
+        supplier_v = server.supplier
+        contract_v = server.contract_no
+        project_v = server.project
+        owner_v = (server.owner_unit or "").strip() or enums.HOME_OWNER_UNIT
+        group_v = server.responsible_group
+        warranty_v = server.warranty_expiry
+        purchase_date_v = server.arrival_date
+        status_to = enums.STATUS_IN_USE
+        loc_kind = enums.LOC_SERVER
+        loc_id = server.id
+    else:
+        # 独立合同采购 / 框招正偏移：全字段手填，入在库
+        if storage_location_id is None:
+            raise BusinessError("必须选择存放位置")
+        loc = db.get(StorageLocation, storage_location_id)
+        if loc is None:
+            raise BusinessError("库位不存在")
+        allowed = loc.allowed_categories or []
+        if allowed and model.category not in allowed:
+            raise BusinessError(
+                f"库位「{loc.warehouse}/{loc.slot}」仅允许："
+                f"{' / '.join(allowed)}，当前型号类型为「{model.category}」"
+            )
+        missing = []
+        for label, val in (
+            ("运维部门", responsible_group),
+            ("供应商", supplier),
+            ("合同号", contract_no),
+            ("所属项目", project),
+            ("产权单位", owner_unit),
+            ("采购日期", purchase_date),
+            ("维保到位时间", warranty_expiry),
+        ):
+            if val is None or (isinstance(val, str) and not val.strip()):
+                missing.append(label)
+        if missing:
+            raise BusinessError(f"以下字段必填：{'、'.join(missing)}")
+        if responsible_group not in enums.RESPONSIBLE_GROUPS:
+            raise BusinessError(f"非法 responsible_group: {responsible_group}")
+        supplier_v = supplier.strip()
+        contract_v = contract_no.strip()
+        project_v = project.strip()
+        owner_v = owner_unit.strip()
+        group_v = responsible_group
+        warranty_v = warranty_expiry
+        purchase_date_v = purchase_date
+        status_to = enums.STATUS_IN_STOCK
+        loc_kind = enums.LOC_STORAGE
+        loc_id = storage_location_id
+
     part = Part(
         model_id=model_id,
         fixed_asset_no=fixed_asset_no,
         serial_no=serial_no,
         source_type=source_type,
-        contract_no=contract_no,
+        contract_no=contract_v,
         purchase_amount=purchase_amount,
-        purchase_date=purchase_date,
-        responsible_group=responsible_group,
-        sensitivity=sensitivity,
-        supplier=supplier,
-        project=project,
-        owner_unit=owner,
-        warranty_expiry=warranty_expiry,
-        allocatable_flag=flag,
-        current_status=enums.STATUS_IN_STOCK,
-        current_loc_kind=enums.LOC_STORAGE,
-        current_loc_id=storage_location_id,
+        purchase_date=purchase_date_v,
+        responsible_group=group_v,
+        sensitivity=sensitivity or "无",
+        supplier=supplier_v,
+        project=project_v,
+        owner_unit=owner_v,
+        warranty_expiry=warranty_v,
+        allocatable_flag=allocatable_flag,
+        current_status=status_to,
+        current_loc_kind=loc_kind,
+        current_loc_id=loc_id,
     )
     db.add(part)
     db.flush()
@@ -128,15 +177,17 @@ def inbound(
         part_id=part.id,
         event_type=enums.EVENT_INBOUND,
         status_from=None,
-        status_to=enums.STATUS_IN_STOCK,
+        status_to=status_to,
         operator_id=operator_id,
         loc_from_kind=enums.LOC_NONE,
         loc_from_id=None,
-        loc_to_kind=enums.LOC_STORAGE,
-        loc_to_id=storage_location_id,
+        loc_to_kind=loc_kind,
+        loc_to_id=loc_id,
         remark=remark,
     )
     apply_projection_from_movement(part, movement)
+    if source_type == enums.SOURCE_ORIGINAL:
+        db.add(PartServerLink(part_id=part.id, server_id=server_id, slot=None))
     try:
         db.commit()
     except IntegrityError as e:

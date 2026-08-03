@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import get_operator_id, require_user
+from .. import enums
+from ..deps import get_current_user, require_role
+from ..models import User
 from ..schemas import (
     ApprovalOut,
     DecideIn,
@@ -33,9 +35,9 @@ def get_approval(approval_id: int, db: Session = Depends(get_db)):
 def create_loan(
     body: LoanApprovalIn,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    operator_id = current_user.id
     try:
         return approvals_service.create_loan_approval(
             db,
@@ -54,9 +56,9 @@ def create_loan(
 def create_transfer(
     body: TransferApprovalIn,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    operator_id = current_user.id
     try:
         return approvals_service.create_transfer_approval(
             db,
@@ -75,9 +77,9 @@ def create_transfer(
 def create_scrap(
     body: ScrapApprovalIn,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    operator_id = current_user.id
     try:
         return approvals_service.create_scrap_approval(
             db,
@@ -96,9 +98,9 @@ def create_scrap(
 def withdraw(
     approval_id: int,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    operator_id = current_user.id
     try:
         return approvals_service.withdraw_approval(
             db, approval_id=approval_id, operator_id=operator_id
@@ -112,9 +114,10 @@ def decide(
     approval_id: int,
     body: DecideIn,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    operator_id = current_user.id
+    require_role(current_user, enums.APPROVER_ROLES)
     try:
         return approvals_service.decide_approval(
             db,

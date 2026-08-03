@@ -3,7 +3,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..category_specs import PART_CATEGORIES
+from ..category_specs import ALL_MANAGED_CATEGORIES
 from ..models import Brand, PartModel
 from .movement import BusinessError
 
@@ -17,9 +17,9 @@ def _normalize_categories(categories: Optional[list[str]]) -> Optional[list[str]
         cat = (raw or "").strip()
         if not cat:
             continue
-        if cat not in PART_CATEGORIES:
+        if cat not in ALL_MANAGED_CATEGORIES:
             raise BusinessError(
-                f"非法配件类型「{cat}」，允许：{' / '.join(PART_CATEGORIES)}"
+                f"非法配件类型「{cat}」，允许：{' / '.join(ALL_MANAGED_CATEGORIES)}"
             )
         if cat not in seen:
             cleaned.append(cat)
@@ -39,9 +39,9 @@ def list_brands(db: Session, *, category: Optional[str] = None) -> list[Brand]:
     rows = list(db.scalars(select(Brand).order_by(Brand.name)).all())
     if not category:
         return rows
-    if category not in PART_CATEGORIES:
+    if category not in ALL_MANAGED_CATEGORIES:
         raise BusinessError(
-            f"非法配件类型「{category}」，允许：{' / '.join(PART_CATEGORIES)}"
+            f"非法配件类型「{category}」，允许：{' / '.join(ALL_MANAGED_CATEGORIES)}"
         )
     return [b for b in rows if brand_matches_category(b, category)]
 

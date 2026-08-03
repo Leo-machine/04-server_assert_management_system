@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api } from '../api'
+import { api, getStoredUser } from '../api'
 
 function locText(kind, id) {
   if (!kind) return '—'
   return `${kind}#${id ?? '-'}`
 }
+
+const CAN_MANAGE = new Set(['审批人', '管理员'])
 
 export default function StocktakeDetail() {
   const { id } = useParams()
@@ -16,6 +18,7 @@ export default function StocktakeDetail() {
   const [scanNo, setScanNo] = useState('')
   const [actualLocId, setActualLocId] = useState('')
   const [feedback, setFeedback] = useState('')
+  const canManage = CAN_MANAGE.has(getStoredUser()?.role || '')
 
   async function load() {
     const [detail, locations] = await Promise.all([
@@ -226,7 +229,7 @@ export default function StocktakeDetail() {
         </tbody>
       </table>
 
-      {inProgress && (
+      {inProgress && canManage && (
         <div style={{ marginTop: '1rem' }}>
           <button
             type="button"
@@ -241,6 +244,11 @@ export default function StocktakeDetail() {
           </button>
           <p className="muted">结案前所有明细不得为「待复核」；只改盘点单状态。</p>
         </div>
+      )}
+      {inProgress && !canManage && (
+        <p className="muted" style={{ marginTop: '1rem' }}>
+          结案需审批人或管理员账号。
+        </p>
       )}
     </div>
   )

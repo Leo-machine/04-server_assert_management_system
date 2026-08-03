@@ -32,7 +32,8 @@ export default function SpecFields({ fields, values, onChange, disabled = false 
 
         if (f.type === 'enum') {
           const options = f.options || []
-          const isCustom = val !== '' && !options.includes(String(val))
+          const strict = !!f.strict
+          const isCustom = !strict && val !== '' && !options.includes(String(val))
           return (
             <EnumField
               key={f.key}
@@ -41,6 +42,7 @@ export default function SpecFields({ fields, values, onChange, disabled = false 
               options={options}
               value={val}
               isCustom={isCustom}
+              strict={strict}
               disabled={disabled}
               required={!!f.required}
               onChange={(v) => onChange(f.key, v)}
@@ -67,17 +69,19 @@ export default function SpecFields({ fields, values, onChange, disabled = false 
   )
 }
 
-/** enum 字段：下拉 + 「其他」自定义输入 */
-function EnumField({ id, label, options, value, isCustom, disabled, required, onChange }) {
+/** enum：strict 仅下拉；非 strict 允许「其他」自定义 */
+function EnumField({ id, label, options, value, isCustom, strict, disabled, required, onChange }) {
   const [inCustom, setInCustom] = useState(isCustom)
   const [customText, setCustomText] = useState(isCustom ? String(value) : '')
-  const showCustom = inCustom || isCustom
+  const showCustom = !strict && (inCustom || isCustom)
+  const selectValue = showCustom
+    ? '__custom__'
+    : (options.includes(String(value)) ? value : '')
 
   function handleSelect(e) {
     const v = e.target.value
     if (v === '__custom__') {
       setInCustom(true)
-      // 不清空已有自定义值，等用户输入后再通过 handleCustomChange 上报
       if (customText) onChange(customText)
       return
     }
@@ -96,7 +100,7 @@ function EnumField({ id, label, options, value, isCustom, disabled, required, on
       <label htmlFor={id}>{label}</label>
       <select
         id={id}
-        value={showCustom ? '__custom__' : value}
+        value={selectValue}
         disabled={disabled}
         required={required && !showCustom}
         onChange={handleSelect}
@@ -105,7 +109,7 @@ function EnumField({ id, label, options, value, isCustom, disabled, required, on
         {options.map((opt) => (
           <option key={opt} value={opt}>{opt}</option>
         ))}
-        <option value="__custom__">其他（自定义）</option>
+        {!strict && <option value="__custom__">其他（自定义）</option>}
       </select>
       {showCustom && (
         <input
@@ -114,7 +118,7 @@ function EnumField({ id, label, options, value, isCustom, disabled, required, on
           value={inCustom ? customText : String(value)}
           disabled={disabled}
           required={required}
-          placeholder="输入自定义值（如 DDR6）"
+          placeholder="输入自定义值"
           onChange={inCustom ? handleCustomChange : (e) => onChange(e.target.value)}
         />
       )}

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import ListToolbar from '../components/ListToolbar'
 import { useSelection } from '../hooks/useSelection'
@@ -36,6 +36,9 @@ const STATUS_META = {
   报废: { color: '#64748b' },
 }
 
+const ALLOC_OPTIONS = ['通用可调', '保留']
+const LOC_KIND_OPTIONS = ['库位', '服务器', '外单位', '无']
+
 function locLabel(part, servers, locs, orgs) {
   if (!part.current_loc_kind) return '-'
   if (part.current_loc_kind === '库位') {
@@ -63,10 +66,74 @@ function statusBadgeClass(status, overdue) {
   return 'pl-badge'
 }
 
+/** 表头点击筛选下拉 */
+function HeaderFilter({ label, value, options, totals, open, onToggle, onSelect }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return undefined
+    function onDoc(e) {
+      if (ref.current && !ref.current.contains(e.target)) onToggle(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open, onToggle])
+
+  return (
+    <th className={`pl-th-filter ${value ? 'is-filtered' : ''}`} ref={ref}>
+      <button
+        type="button"
+        className="pl-th-btn"
+        onClick={() => onToggle(!open)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span>{label}</span>
+        {value ? <em className="pl-th-val">{value}</em> : null}
+        <span className="pl-th-caret" aria-hidden>▾</span>
+      </button>
+      {open && (
+        <div className="pl-th-menu" role="listbox">
+          <button
+            type="button"
+            className={!value ? 'is-on' : ''}
+            onClick={() => {
+              onSelect('')
+              onToggle(false)
+            }}
+          >
+            全部
+          </button>
+          {options.map((opt) => {
+            const n = totals[opt] || 0
+            if (!n && value !== opt) return null
+            return (
+              <button
+                key={opt}
+                type="button"
+                className={value === opt ? 'is-on' : ''}
+                onClick={() => {
+                  onSelect(value === opt ? '' : opt)
+                  onToggle(false)
+                }}
+              >
+                <span>{opt}</span>
+                <em>{n}</em>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </th>
+  )
+}
+
 export default function PartsList() {
+  const nav = useNavigate()
   const [params, setParams] = useSearchParams()
   const filterCat = params.get('category') || ''
   const filterStatus = params.get('status') || ''
+  const filterAlloc = params.get('alloc') || ''
+  const filterLocKind = params.get('loc') || ''
 
   const [parts, setParts] = useState([])
   const [servers, setServers] = useState([])
@@ -77,6 +144,9 @@ export default function PartsList() {
   const [busyId, setBusyId] = useState(null)
   const [batchBusy, setBatchBusy] = useState(false)
   const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [openFilter, setOpenFilter] = useState('') // status | alloc | loc | ''
 
   function reload() {
     return Promise.all([
@@ -111,22 +181,13 @@ export default function PartsList() {
     return map
   }, [parts])
 
-  const statusTotals = useMemo(() => {
-    const t = {}
-    for (const p of parts) {
-      const st = p.current_status || '未知'
-      t[st] = (t[st] || 0) + 1
-    }
-    return t
-  }, [parts])
-
-  const visible = useMemo(() => {
-    const filtered = parts.filter((p) => {
+  // 表头筛选项计数：受其它已选条件约束（不含本列自身），避免「在库 8」下仍显示可调配 808
+  const scopedParts = useMemo(() => {
+    const base = parts.filter((p) => {
       if (filterCat && (p.model?.category || '') !== filterCat) return false
-      if (filterStatus && p.current_status !== filterStatus) return false
       return true
     })
-    return filterByQuery(filtered, query, (p) => [
+    return filterByQuery(base, query, (p) => [
       p.fixed_asset_no,
       p.serial_no,
       p.owner_unit,
@@ -140,27 +201,88 @@ export default function PartsList() {
       p.project,
       locLabel(p, servers, locs, orgs),
     ])
-  }, [parts, filterCat, filterStatus, query, servers, locs, orgs])
+  }, [parts, filterCat, query, servers, locs, orgs])
+
+  function applyOtherFilters(list, { skip } = {}) {
+    return list.filter((p) => {
+      if (skip !== 'status' && filterStatus && p.current_status !== filterStatus) return false
+      if (skip !== 'alloc' && filterAlloc && (p.allocatable_flag || '') !== filterAlloc) return false
+      if (skip !== 'loc' && filterLocKind) {
+        const kind = p.current_loc_kind || '无'
+        if (kind !== filterLocKind) return false
+      }
+      return true
+    })
+  }
+
+  const statusTotals = useMemo(() => {
+    const t = {}
+    for (const p of applyOtherFilters(scopedParts, { skip: 'status' })) {
+      const st = p.current_status || '未知'
+      t[st] = (t[st] || 0) + 1
+    }
+    return t
+  }, [scopedParts, filterAlloc, filterLocKind])
+
+  const allocTotals = useMemo(() => {
+    const t = {}
+    for (const p of applyOtherFilters(scopedParts, { skip: 'alloc' })) {
+      const a = p.allocatable_flag || '未知'
+      t[a] = (t[a] || 0) + 1
+    }
+    return t
+  }, [scopedParts, filterStatus, filterLocKind])
+
+  const locKindTotals = useMemo(() => {
+    const t = {}
+    for (const p of applyOtherFilters(scopedParts, { skip: 'loc' })) {
+      const k = p.current_loc_kind || '无'
+      t[k] = (t[k] || 0) + 1
+    }
+    return t
+  }, [scopedParts, filterStatus, filterAlloc])
+
+  const visible = useMemo(
+    () => applyOtherFilters(scopedParts),
+    [scopedParts, filterStatus, filterAlloc, filterLocKind],
+  )
 
   const visibleIds = useMemo(() => visible.map((p) => p.id), [visible])
   const sel = useSelection(visibleIds)
+
+  const totalPages = Math.max(1, Math.ceil(visible.length / pageSize))
+  const safePage = Math.min(page, totalPages)
+  const paged = useMemo(
+    () => visible.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [visible, safePage, pageSize],
+  )
+  useEffect(() => {
+    setPage(1)
+  }, [filterCat, filterStatus, filterAlloc, filterLocKind, query, pageSize])
 
   const populatedCats = useMemo(
     () => CATEGORY_ORDER.filter((c) => (categoryStats[c]?.total || 0) > 0),
     [categoryStats],
   )
 
-  function setFilter({ category, status } = {}) {
+  const hasFilters = !!(filterCat || filterStatus || filterAlloc || filterLocKind || query)
+
+  function setFilter(patch = {}) {
     const next = {}
-    const cat = category === undefined ? filterCat : category
-    const st = status === undefined ? filterStatus : status
+    const cat = patch.category === undefined ? filterCat : patch.category
+    const st = patch.status === undefined ? filterStatus : patch.status
+    const alloc = patch.alloc === undefined ? filterAlloc : patch.alloc
+    const loc = patch.loc === undefined ? filterLocKind : patch.loc
     if (cat) next.category = cat
     if (st) next.status = st
+    if (alloc) next.alloc = alloc
+    if (loc) next.loc = loc
     setParams(next)
     sel.clear()
   }
 
-  async function toggleAlloc(part) {
+  async function toggleAlloc(part, e) {
+    e?.stopPropagation?.()
     if (part.current_status !== '在库') return
     const next = part.allocatable_flag === '通用可调' ? '保留' : '通用可调'
     setBusyId(part.id)
@@ -169,8 +291,8 @@ export default function PartsList() {
     try {
       await api.patch(`/parts/${part.id}`, { allocatable_flag: next })
       await reload()
-    } catch (e) {
-      setError(e.message)
+    } catch (err) {
+      setError(err.message)
     } finally {
       setBusyId(null)
     }
@@ -205,16 +327,20 @@ export default function PartsList() {
     if (okN > 0) setOk(`已更新 ${okN} 件为「${flag}」`)
   }
 
+  function openDetail(id) {
+    nav(`/parts/${id}`)
+  }
+
   return (
     <div className="pl-page">
       <header className="pl-header">
         <div>
           <h2>配件列表</h2>
           <p className="muted">
-            共 {parts.length} 件 · 支持模糊搜索与批量改可调配（仅在库）
+            共 {parts.length} 件 · 点击资产编号查看详情 · 表头可筛选状态 / 可调配 / 位置
           </p>
         </div>
-        {(filterCat || filterStatus || query) && (
+        {hasFilters && (
           <button
             type="button"
             className="secondary pl-clear"
@@ -275,35 +401,6 @@ export default function PartsList() {
         {!populatedCats.length && <p className="muted">暂无配件数据</p>}
       </section>
 
-      <div className="pl-toolbar">
-        <div className="pl-filters">
-          <span className="pl-filter-label">状态</span>
-          <button
-            type="button"
-            className={`pl-pill ${!filterStatus ? 'is-on' : ''}`}
-            onClick={() => setFilter({ status: '' })}
-          >
-            全部
-          </button>
-          {Object.entries(STATUS_META).map(([st, meta]) => {
-            const n = statusTotals[st] || 0
-            if (!n && filterStatus !== st) return null
-            return (
-              <button
-                key={st}
-                type="button"
-                className={`pl-pill ${filterStatus === st ? 'is-on' : ''}`}
-                onClick={() => setFilter({ status: filterStatus === st ? '' : st })}
-              >
-                <i style={{ background: meta.color }} />
-                {st}
-                <em>{n}</em>
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
       <ListToolbar
         query={query}
         onQueryChange={(q) => {
@@ -316,6 +413,8 @@ export default function PartsList() {
             显示 <strong>{visible.length}</strong>
             {filterCat ? ` · ${filterCat}` : ''}
             {filterStatus ? ` · ${filterStatus}` : ''}
+            {filterAlloc ? ` · ${filterAlloc}` : ''}
+            {filterLocKind ? ` · ${filterLocKind}` : ''}
           </>
         }
         selectedCount={sel.selectedCount}
@@ -358,19 +457,50 @@ export default function PartsList() {
               </th>
               <th>资产编号</th>
               <th>类型 / 型号</th>
-              <th>状态</th>
-              <th>可调配</th>
-              <th>位置</th>
+              <HeaderFilter
+                label="状态"
+                value={filterStatus}
+                options={Object.keys(STATUS_META)}
+                totals={statusTotals}
+                open={openFilter === 'status'}
+                onToggle={(v) => setOpenFilter(v ? 'status' : '')}
+                onSelect={(v) => setFilter({ status: v })}
+              />
+              <HeaderFilter
+                label="可调配"
+                value={filterAlloc}
+                options={ALLOC_OPTIONS}
+                totals={allocTotals}
+                open={openFilter === 'alloc'}
+                onToggle={(v) => setOpenFilter(v ? 'alloc' : '')}
+                onSelect={(v) => setFilter({ alloc: v })}
+              />
+              <HeaderFilter
+                label="位置"
+                value={filterLocKind}
+                options={LOC_KIND_OPTIONS}
+                totals={locKindTotals}
+                open={openFilter === 'loc'}
+                onToggle={(v) => setOpenFilter(v ? 'loc' : '')}
+                onSelect={(v) => setFilter({ loc: v })}
+              />
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            {visible.map((p) => {
+            {paged.map((p) => {
               const canToggleAlloc = p.current_status === '在库'
               const isGeneral = p.allocatable_flag === '通用可调'
               return (
-                <tr key={p.id} className={sel.isSelected(p.id) ? 'is-selected' : ''}>
-                  <td className="lt-check-col">
+                <tr
+                  key={p.id}
+                  className={`pl-row-click ${sel.isSelected(p.id) ? 'is-selected' : ''}`}
+                  onClick={(e) => {
+                    if (e.target.closest('a,button,input,label')) return
+                    openDetail(p.id)
+                  }}
+                >
+                  <td className="lt-check-col" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={sel.isSelected(p.id)}
@@ -379,7 +509,13 @@ export default function PartsList() {
                     />
                   </td>
                   <td>
-                    <div className="pl-asset">{p.fixed_asset_no}</div>
+                    <Link
+                      className="pl-asset-link"
+                      to={`/parts/${p.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {p.fixed_asset_no}
+                    </Link>
                     <div className="pl-sub">{p.owner_unit || '—'}</div>
                   </td>
                   <td>
@@ -406,13 +542,13 @@ export default function PartsList() {
                       {p.is_overdue ? ' · 超期' : ''}
                     </span>
                   </td>
-                  <td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     {canToggleAlloc ? (
                       <button
                         type="button"
                         className={`pl-alloc ${isGeneral ? 'is-general' : 'is-reserved'}`}
                         disabled={busyId === p.id}
-                        onClick={() => toggleAlloc(p)}
+                        onClick={(e) => toggleAlloc(p, e)}
                         title="点击切换：通用可调 / 保留（仅在库）"
                       >
                         {p.allocatable_flag || '—'}
@@ -427,8 +563,9 @@ export default function PartsList() {
                     )}
                   </td>
                   <td className="pl-loc">{locLabel(p, servers, locs, orgs)}</td>
-                  <td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <div className="pl-actions">
+                      <Link to={`/parts/${p.id}`}>详情</Link>
                       <Link to={`/parts/${p.id}/history`}>履历</Link>
                       {p.current_status === '在库' && (
                         <>
@@ -453,13 +590,67 @@ export default function PartsList() {
                 </tr>
               )
             })}
-            {!visible.length && (
+            {!paged.length && (
               <tr>
                 <td colSpan={7} className="pl-empty">当前筛选下暂无配件</td>
               </tr>
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="pl-pager">
+        <span className="muted">
+          共 {visible.length} 条 · 第 {safePage}/{totalPages} 页
+        </span>
+        <div className="pl-pager-btns">
+          <button
+            type="button"
+            className="secondary"
+            disabled={safePage <= 1}
+            onClick={() => setPage(safePage - 1)}
+          >
+            上一页
+          </button>
+          {Array.from({ length: totalPages }, (_, i) => i + 1)
+            .filter((n) => n === 1 || n === totalPages || Math.abs(n - safePage) <= 2)
+            .reduce((acc, n, i, arr) => {
+              if (i > 0 && n - arr[i - 1] > 1) acc.push('…')
+              acc.push(n)
+              return acc
+            }, [])
+            .map((n, i) =>
+              n === '…' ? (
+                <span key={`gap-${i}`} className="muted">…</span>
+              ) : (
+                <button
+                  key={n}
+                  type="button"
+                  className={n === safePage ? '' : 'secondary'}
+                  onClick={() => setPage(n)}
+                >
+                  {n}
+                </button>
+              ),
+            )}
+          <button
+            type="button"
+            className="secondary"
+            disabled={safePage >= totalPages}
+            onClick={() => setPage(safePage + 1)}
+          >
+            下一页
+          </button>
+        </div>
+        <select
+          value={pageSize}
+          onChange={(e) => setPageSize(Number(e.target.value))}
+          aria-label="每页条数"
+        >
+          <option value={10}>10 条/页</option>
+          <option value={20}>20 条/页</option>
+          <option value={50}>50 条/页</option>
+        </select>
       </div>
     </div>
   )

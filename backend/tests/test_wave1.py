@@ -3,7 +3,7 @@
 from datetime import date, timedelta
 
 from app import enums
-from tests.conftest import op_headers
+from tests.conftest import demo_cast, op_headers
 
 
 # ---------- 辅助 ----------
@@ -58,7 +58,7 @@ def _inbound(client, *, sensitivity=None) -> int:
             "model_id": models[0]["id"],
             "fixed_asset_no": f"FA-W1-{sensitivity or 'NORMAL'}-001",
             "storage_location_id": loc_id,
-            "source_type": "单独合同",
+            "source_type": "独立合同采购",
             "responsible_group": "基础组",
             "serial_no": f"SN-W1-{sensitivity or 'NORMAL'}-001",
             "contract_no": "HT-TEST-001",
@@ -82,8 +82,9 @@ def _inbound(client, *, sensitivity=None) -> int:
 
 def test_scrap_from_stock_full_flow(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
-    approvers = [users[1]["id"], users[2]["id"], users[3]["id"]]
+    cast = demo_cast(client)
+    users = cast["users"]
+    approvers = cast["approver_ids"]
 
     r = client.post(
         "/api/approvals/scrap",
@@ -93,7 +94,7 @@ def test_scrap_from_stock_full_flow(client):
             "approver_ids": approvers,
             "remark": "例行报废",
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 200, r.json()
     ap = r.json()
@@ -123,7 +124,7 @@ def test_scrap_from_stock_full_flow(client):
     r2 = client.post(
         f"/api/parts/{part_id}/install",
         json={"server_id": 2},
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r2.status_code == 400
     r3 = client.post(
@@ -133,20 +134,21 @@ def test_scrap_from_stock_full_flow(client):
             "reason_code": enums.REASON_SCRAP_DESTROY,
             "approver_ids": approvers,
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r3.status_code == 400
 
 
 def test_scrap_from_damaged(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
-    approvers = [users[1]["id"], users[2]["id"], users[3]["id"]]
+    cast = demo_cast(client)
+    users = cast["users"]
+    approvers = cast["approver_ids"]
 
     r = client.post(
         f"/api/parts/{part_id}/damage",
         json={"remark": "库内发现金手指氧化"},
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 200
     assert r.json()["current_status"] == enums.STATUS_DAMAGED
@@ -158,7 +160,7 @@ def test_scrap_from_damaged(client):
             "reason_code": enums.REASON_SCRAP_FACTORY,
             "approver_ids": approvers,
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 200, r.json()
     final = _approve_full(client, r.json()["id"], approvers)
@@ -174,8 +176,9 @@ def test_scrap_from_damaged(client):
 
 def test_scrap_rejected_writes_no_movement(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
-    approvers = [users[1]["id"], users[2]["id"], users[3]["id"]]
+    cast = demo_cast(client)
+    users = cast["users"]
+    approvers = cast["approver_ids"]
 
     ap = client.post(
         "/api/approvals/scrap",
@@ -184,7 +187,7 @@ def test_scrap_rejected_writes_no_movement(client):
             "reason_code": enums.REASON_SCRAP_DESTROY,
             "approver_ids": approvers,
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     ).json()
     r = client.post(
         f"/api/approvals/{ap['id']}/decide",
@@ -202,8 +205,9 @@ def test_scrap_rejected_writes_no_movement(client):
 
 def test_scrap_voided_when_status_changed_before_final(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
-    approvers = [users[1]["id"], users[2]["id"], users[3]["id"]]
+    cast = demo_cast(client)
+    users = cast["users"]
+    approvers = cast["approver_ids"]
 
     ap = client.post(
         "/api/approvals/scrap",
@@ -212,7 +216,7 @@ def test_scrap_voided_when_status_changed_before_final(client):
             "reason_code": enums.REASON_SCRAP_DESTROY,
             "approver_ids": approvers,
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     ).json()
     for level, uid in ((1, approvers[0]), (2, approvers[1])):
         client.post(
@@ -225,7 +229,7 @@ def test_scrap_voided_when_status_changed_before_final(client):
     r = client.post(
         f"/api/parts/{part_id}/install",
         json={"server_id": 2},
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 200
 
@@ -246,10 +250,46 @@ def test_scrap_voided_when_status_changed_before_final(client):
     assert "系统作废" in ap_after["remark"]
 
 
-def test_scrap_sensitive_part_requires_attachment(client):
-    part_id = _inbound(client, sensitivity="管控")
-    users = _users(client)
-    approvers = [users[1]["id"], users[2]["id"], users[3]["id"]]
+def _inbound_gpu(client) -> int:
+    """入库一个在库算力卡（报废影像证据按类型强制的测试件）。"""
+    models = client.get("/api/part-models").json()
+    gpu = next(m for m in models if m["category"] == "算力卡")
+    locs = client.get("/api/storage-locations").json()
+    loc = next(
+        l for l in locs
+        if not l.get("allowed_categories") or "算力卡" in l["allowed_categories"]
+    )
+    cast = demo_cast(client)
+    r = client.post(
+        "/api/parts/inbound",
+        json={
+            "model_id": gpu["id"],
+            "fixed_asset_no": "FA-W1-GPU-001",
+            "storage_location_id": loc["id"],
+            "source_type": "独立合同采购",
+            "responsible_group": "基础组",
+            "serial_no": "SN-W1-GPU-001",
+            "contract_no": "HT-W1-001",
+            "purchase_amount": 50000,
+            "purchase_date": "2026-07-01",
+            "supplier": "测试供应商",
+            "project": "测试项目",
+            "owner_unit": "本单位信息中心",
+            "warranty_expiry": "2028-07-01",
+            "allocatable_flag": "通用可调",
+            "remark": "测试",
+        },
+        headers=op_headers(cast["applicant"]["id"]),
+    )
+    assert r.status_code == 200, r.json()
+    return r.json()["id"]
+
+
+def test_scrap_gpu_requires_attachment(client):
+    """算力卡类高值件报废：无影像证据拦截，有证据放行（按配件类型判断）。"""
+    part_id = _inbound_gpu(client)
+    cast = demo_cast(client)
+    approvers = cast["approver_ids"]
 
     r = client.post(
         "/api/approvals/scrap",
@@ -258,7 +298,7 @@ def test_scrap_sensitive_part_requires_attachment(client):
             "reason_code": enums.REASON_SCRAP_FACTORY,
             "approver_ids": approvers,
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 400
     assert "影像证据" in r.json()["detail"]
@@ -271,24 +311,24 @@ def test_scrap_sensitive_part_requires_attachment(client):
             "approver_ids": approvers,
             "attachment_ref": "WO-2026-0731-照片.zip",
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r2.status_code == 200
     assert r2.json()["attachment_ref"] == "WO-2026-0731-照片.zip"
 
 
-def test_scrap_sensitivity_none_does_not_require_attachment(client):
-    """sensitivity=「无」不得按敏感件强制影像证据。"""
-    part_id = _inbound(client, sensitivity="无")
-    users = _users(client)
+def test_scrap_non_gpu_no_attachment(client):
+    """非算力卡类型（如内存）报废不得强制影像证据。"""
+    part_id = _inbound(client)
+    cast = demo_cast(client)
     r = client.post(
         "/api/approvals/scrap",
         json={
             "part_id": part_id,
             "reason_code": enums.REASON_SCRAP_DESTROY,
-            "approver_ids": [users[1]["id"], users[2]["id"], users[3]["id"]],
+            "approver_ids": cast["approver_ids"],
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 200
 
@@ -324,7 +364,7 @@ def test_inbound_rejects_location_category_mismatch(client):
             "model_id": mem["id"],
             "fixed_asset_no": "FA-LOC-MISMATCH-1",
             "storage_location_id": restricted["id"],
-            "source_type": "单独合同",
+            "source_type": "独立合同采购",
             "responsible_group": "基础组",
             "serial_no": "SN-LOC-MISMATCH-1",
             "contract_no": "HT-LOC-1",
@@ -346,15 +386,16 @@ def test_inbound_rejects_location_category_mismatch(client):
 
 def test_scrap_invalid_reason_code(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
+    cast = demo_cast(client)
+    users = cast["users"]
     r = client.post(
         "/api/approvals/scrap",
         json={
             "part_id": part_id,
             "reason_code": "随便扔了",
-            "approver_ids": [users[1]["id"], users[2]["id"], users[3]["id"]],
+            "approver_ids": cast["approver_ids"],
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 400
     assert "报废缘由" in r.json()["detail"]
@@ -364,9 +405,9 @@ def test_scrap_invalid_reason_code(client):
 
 def test_transfer_full_flow(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
+    cast = demo_cast(client)
     org = _org(client)
-    approvers = [users[1]["id"], users[2]["id"], users[3]["id"]]
+    approvers = cast["approver_ids"]
 
     r = client.post(
         "/api/approvals/transfer",
@@ -376,7 +417,7 @@ def test_transfer_full_flow(client):
             "approver_ids": approvers,
             "reason_code": "集团内划转",
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 200, r.json()
     ap = r.json()
@@ -401,27 +442,28 @@ def test_transfer_full_flow(client):
     r2 = client.post(
         f"/api/parts/{part_id}/install",
         json={"server_id": 2},
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r2.status_code == 400
 
 
 def test_transfer_from_damaged_blocked(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
+    cast = demo_cast(client)
+    users = cast["users"]
     client.post(
         f"/api/parts/{part_id}/damage",
         json={"remark": "损坏"},
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     r = client.post(
         "/api/approvals/transfer",
         json={
             "part_id": part_id,
             "dest_org_id": _org(client)["id"],
-            "approver_ids": [users[1]["id"], users[2]["id"], users[3]["id"]],
+            "approver_ids": cast["approver_ids"],
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 400
     assert "非法起始状态" in r.json()["detail"]
@@ -483,16 +525,17 @@ def test_report_damage_requires_remark(client):
 
 def test_damaged_part_blocked_from_install_and_loan(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
+    cast = demo_cast(client)
+    users = cast["users"]
     client.post(
         f"/api/parts/{part_id}/damage",
         json={"remark": "损坏"},
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     r = client.post(
         f"/api/parts/{part_id}/install",
         json={"server_id": 2},
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 400
     r2 = client.post(
@@ -501,9 +544,9 @@ def test_damaged_part_blocked_from_install_and_loan(client):
             "part_id": part_id,
             "dest_org_id": _org(client)["id"],
             "expected_return_date": str(date.today() + timedelta(days=7)),
-            "approver_ids": [users[1]["id"], users[2]["id"], users[3]["id"]],
+            "approver_ids": cast["approver_ids"],
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r2.status_code == 400
 
@@ -512,8 +555,9 @@ def test_damaged_part_blocked_from_install_and_loan(client):
 
 def test_withdraw_by_applicant_and_reapply(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
-    approvers = [users[1]["id"], users[2]["id"], users[3]["id"]]
+    cast = demo_cast(client)
+    users = cast["users"]
+    approvers = cast["approver_ids"]
 
     ap = client.post(
         "/api/approvals/scrap",
@@ -522,12 +566,12 @@ def test_withdraw_by_applicant_and_reapply(client):
             "reason_code": enums.REASON_SCRAP_DESTROY,
             "approver_ids": approvers,
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     ).json()
 
     r = client.post(
         f"/api/approvals/{ap['id']}/withdraw",
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 200
     assert r.json()["overall_status"] == enums.APPROVAL_WITHDRAWN
@@ -544,26 +588,27 @@ def test_withdraw_by_applicant_and_reapply(client):
             "reason_code": enums.REASON_SCRAP_DESTROY,
             "approver_ids": approvers,
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r2.status_code == 200
 
 
 def test_withdraw_by_non_applicant_blocked(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
+    cast = demo_cast(client)
+    users = cast["users"]
     ap = client.post(
         "/api/approvals/scrap",
         json={
             "part_id": part_id,
             "reason_code": enums.REASON_SCRAP_DESTROY,
-            "approver_ids": [users[1]["id"], users[2]["id"], users[3]["id"]],
+            "approver_ids": cast["approver_ids"],
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     ).json()
     r = client.post(
         f"/api/approvals/{ap['id']}/withdraw",
-        headers=op_headers(users[1]["id"]),
+        headers=op_headers(cast["a1"]["id"]),
     )
     assert r.status_code == 400
     assert "申请人" in r.json()["detail"]
@@ -571,8 +616,9 @@ def test_withdraw_by_non_applicant_blocked(client):
 
 def test_withdraw_finished_approval_blocked(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
-    approvers = [users[1]["id"], users[2]["id"], users[3]["id"]]
+    cast = demo_cast(client)
+    users = cast["users"]
+    approvers = cast["approver_ids"]
     ap = client.post(
         "/api/approvals/scrap",
         json={
@@ -580,12 +626,12 @@ def test_withdraw_finished_approval_blocked(client):
             "reason_code": enums.REASON_SCRAP_DESTROY,
             "approver_ids": approvers,
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     ).json()
     _approve_full(client, ap["id"], approvers)
     r = client.post(
         f"/api/approvals/{ap['id']}/withdraw",
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 400
     assert "不可撤回" in r.json()["detail"]
@@ -595,8 +641,9 @@ def test_withdraw_finished_approval_blocked(client):
 
 def test_inflight_blocks_any_action_type(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
-    approvers = [users[1]["id"], users[2]["id"], users[3]["id"]]
+    cast = demo_cast(client)
+    users = cast["users"]
+    approvers = cast["approver_ids"]
     org = _org(client)
 
     loan = client.post(
@@ -607,7 +654,7 @@ def test_inflight_blocks_any_action_type(client):
             "expected_return_date": str(date.today() + timedelta(days=7)),
             "approver_ids": approvers,
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert loan.status_code == 200
 
@@ -618,7 +665,7 @@ def test_inflight_blocks_any_action_type(client):
             "reason_code": enums.REASON_SCRAP_DESTROY,
             "approver_ids": approvers,
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert scrap.status_code == 400
     assert "审批中" in scrap.json()["detail"]
@@ -630,7 +677,7 @@ def test_inflight_blocks_any_action_type(client):
             "dest_org_id": org["id"],
             "approver_ids": approvers,
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert transfer.status_code == 400
 
@@ -686,16 +733,17 @@ def test_surplus_rescan_is_idempotent(client):
 
 def test_loan_past_return_date_blocked(client):
     part_id = _stock_part_ids(client)[0]
-    users = _users(client)
+    cast = demo_cast(client)
+    users = cast["users"]
     r = client.post(
         "/api/approvals/loan",
         json={
             "part_id": part_id,
             "dest_org_id": _org(client)["id"],
             "expected_return_date": str(date.today() - timedelta(days=1)),
-            "approver_ids": [users[1]["id"], users[2]["id"], users[3]["id"]],
+            "approver_ids": cast["approver_ids"],
         },
-        headers=op_headers(users[0]["id"]),
+        headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 400
     assert "归还日" in r.json()["detail"]

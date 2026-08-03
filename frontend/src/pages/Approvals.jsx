@@ -66,7 +66,7 @@ export default function Approvals() {
     <div className="panel">
       <h2>审批中心</h2>
       <p className="muted">
-        当前操作人 ID={operatorId}。只有本级指定审批人用对应身份切换后才能点通过/驳回；申请人可撤回审批中的单子。
+        只有本级指定审批人登录后才能点通过/驳回（请退出后换号）；申请人可撤回审批中的单子。
         审批动作按级指定人执行，不提供批量通过/驳回。
       </p>
       {error && <div className="error">{error}</div>}

@@ -5,6 +5,8 @@ import { filterByQuery } from '../lib/fuzzy'
 
 const BAR_COLORS = ['#005a9c', '#0f766e', '#0369a1', '#1d4ed8', '#0a7ea4', '#0284c7']
 
+const ALL_CATEGORIES = ['内存', '机械硬盘', '固态硬盘', 'RAID卡', '光模块', '网卡', 'HBA卡', '算力卡']
+
 export default function AllocatableSummary() {
   const [rows, setRows] = useState([])
   const [category, setCategory] = useState('内存')
@@ -55,14 +57,18 @@ export default function AllocatableSummary() {
         <div>
           <h2>可调余量</h2>
           <p className="muted">
-            在库 ∩ 本单位信息中心 ∩ 通用可调 · 按规格跨型号聚合
+            在库 ∩ 本单位信息中心 ∩ 通用可调 · 内存按规格聚合，其余品类按型号聚合
           </p>
         </div>
         <div className="as-controls">
           <label className="as-field">
             <span>品类</span>
             <select value={category} onChange={(e) => setCategory(e.target.value)}>
-              <option value="内存">内存</option>
+              {ALL_CATEGORIES.map(
+                (c) => (
+                  <option key={c} value={c}>{c}</option>
+                ),
+              )}
             </select>
           </label>
           <button

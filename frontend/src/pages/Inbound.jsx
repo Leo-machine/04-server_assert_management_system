@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { api } from '../api'
+import { api, downloadCsv, getStoredUser } from '../api'
 import { formatSpec } from '../components/SpecFields'
+import ImportWizard from '../components/ImportWizard'
 
 const CATEGORY_META = {
   内存: { desc: '容量 / 类型 / 频率', tone: 'c1' },
@@ -14,23 +15,35 @@ const CATEGORY_META = {
   算力卡: { desc: '显存 / 封装 / 架构', tone: 'c8' },
 }
 
+const SOURCES = ['服务器原装', '独立合同采购', '框招正偏移']
+const GROUPS = ['基础组', '运营组', '网络组', '平台组']
+
 const emptyCommon = {
   model_id: '',
   fixed_asset_no: '',
-  storage_location_id: '',
-  source_type: '单独合同',
-  responsible_group: '基础组',
   serial_no: '',
+  source_type: '独立合同采购',
+  server_id: '',
+  storage_location_id: '',
+  responsible_group: '基础组',
+  supplier: '',
   contract_no: '',
   purchase_amount: '',
   purchase_date: '',
-  sensitivity: '',
-  supplier: '',
   project: '',
   owner_unit: '本单位信息中心',
   warranty_expiry: '',
   allocatable_flag: '通用可调',
   remark: '',
+}
+
+function RoField({ label, value }) {
+  return (
+    <label>
+      {label}
+      <input value={value || '—'} readOnly disabled style={{ background: 'var(--bg-muted, #f5f5f5)' }} />
+    </label>
+  )
 }
 
 export default function Inbound() {
@@ -42,26 +55,31 @@ export default function Inbound() {
   const [models, setModels] = useState([])
   const [locs, setLocs] = useState([])
   const [suppliers, setSuppliers] = useState([])
+  const [servers, setServers] = useState([])
   const [form, setForm] = useState(emptyCommon)
   const [error, setError] = useState('')
   const [ok, setOk] = useState('')
+  const [showImport, setShowImport] = useState(false)
+  const isAdmin = getStoredUser()?.role === '管理员'
 
   const schema = useMemo(
     () => schemas.find((s) => s.category === category),
     [schemas, category],
   )
-
   const categoryModels = useMemo(
     () => models.filter((m) => m.category === category),
     [models, category],
   )
-
   const selectedModel = useMemo(
     () => categoryModels.find((m) => String(m.id) === String(form.model_id)),
     [categoryModels, form.model_id],
   )
+  const selectedServer = useMemo(
+    () => servers.find((s) => String(s.id) === String(form.server_id)),
+    [servers, form.server_id],
+  )
+  const isOriginal = form.source_type === '服务器原装'
 
-  // 按当前配件类型加载兼容库位
   useEffect(() => {
     const locUrl = category
       ? `/storage-locations?category=${encodeURIComponent(category)}`
@@ -71,12 +89,14 @@ export default function Inbound() {
       api.get('/part-models'),
       api.get(locUrl),
       api.get('/suppliers'),
+      api.get('/servers'),
     ])
-      .then(([cats, ms, ls, sps]) => {
+      .then(([cats, ms, ls, sps, srvs]) => {
         setSchemas(cats)
         setModels(ms)
         setLocs(ls)
         setSuppliers(sps)
+        setServers(srvs)
         const firstLocId = ls[0]?.id ? String(ls[0].id) : ''
         setForm((f) => ({
           ...f,
@@ -91,9 +111,9 @@ export default function Inbound() {
     const first = models.find((m) => m.category === category)
     setForm((f) => ({
       ...emptyCommon,
+      source_type: f.source_type,
       storage_location_id: f.storage_location_id || String(locs[0]?.id || ''),
       model_id: first ? String(first.id) : '',
-      sensitivity: category === '算力卡' ? '管控' : '',
     }))
     setError('')
     setOk('')
@@ -103,31 +123,39 @@ export default function Inbound() {
     setParams({ category: cat })
   }
 
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+
   async function onSubmit(e) {
     e.preventDefault()
     setError('')
     setOk('')
     try {
-      const part = await api.post('/parts/inbound', {
+      const payload = {
         model_id: Number(form.model_id),
         fixed_asset_no: form.fixed_asset_no,
-        storage_location_id: Number(form.storage_location_id),
-        source_type: form.source_type,
-        responsible_group: form.responsible_group,
         serial_no: form.serial_no,
-        contract_no: form.contract_no,
+        source_type: form.source_type,
         purchase_amount: Number(form.purchase_amount),
-        purchase_date: form.purchase_date,
-        sensitivity: form.sensitivity,
-        supplier: form.supplier,
-        project: form.project,
-        owner_unit: form.owner_unit,
-        warranty_expiry: form.warranty_expiry,
         allocatable_flag: form.allocatable_flag,
         remark: form.remark,
-      })
-      setOk(`入库成功：${part.fixed_asset_no}`)
-      setTimeout(() => nav('/'), 800)
+      }
+      if (isOriginal) {
+        payload.server_id = Number(form.server_id)
+      } else {
+        Object.assign(payload, {
+          storage_location_id: Number(form.storage_location_id),
+          responsible_group: form.responsible_group,
+          supplier: form.supplier,
+          contract_no: form.contract_no,
+          purchase_date: form.purchase_date,
+          project: form.project,
+          owner_unit: form.owner_unit,
+          warranty_expiry: form.warranty_expiry,
+        })
+      }
+      const part = await api.post('/parts/inbound', payload)
+      setOk(`入库成功：${part.fixed_asset_no}（${part.current_status}）`)
+      setTimeout(() => nav('/'), 900)
     } catch (err) {
       setError(err.message)
     }
@@ -139,11 +167,15 @@ export default function Inbound() {
         <h2>分类入库</h2>
         <p className="muted">
           请选择配件类型进入对应入库表单。不同类型规格字段不同，保证入库数据可用、可检索。
-          型号不足时请先到 <Link to="/part-models">型号管理</Link> 维护。
+          型号不足时请先联系管理员在「型号管理」中维护
+          {isAdmin && (
+            <>（<Link to="/part-models">打开型号管理</Link>）</>
+          )}
+          。
         </p>
         {error && <div className="error">{error}</div>}
         <div className="category-grid">
-          {(schemas.length ? schemas.map((s) => s.category) : Object.keys(CATEGORY_META)).map(
+          {(schemas.length ? schemas.map((s) => s.category).filter((c) => c !== '服务器') : Object.keys(CATEGORY_META)).map(
             (cat) => {
               const meta = CATEGORY_META[cat] || { desc: cat, tone: 'c1' }
               const count = models.filter((m) => m.category === cat).length
@@ -168,34 +200,203 @@ export default function Inbound() {
 
   return (
     <div className="panel">
-      <h2>{category} · 入库</h2>
-      <p className="muted">
-        <button type="button" className="linkish" onClick={() => setParams({})}>
-          ← 返回分类选择
+      <div className="inb-head">
+        <button type="button" className="inb-back" onClick={() => setParams({})}>
+          <span className="inb-back-arrow">‹</span> 返回分类选择
         </button>
-        {' · '}
-        <Link to={`/part-models?category=${encodeURIComponent(category)}`}>管理本类型号</Link>
-      </p>
+        <div className="inb-title">
+          <h2>{category} · 入库</h2>
+          <span className="inb-sub">来源先行 · 逐件录入 / 批量导入</span>
+        </div>
+        <div className="inb-actions">
+          {isAdmin && (
+            <Link
+              className="inb-btn"
+              to={`/part-models?category=${encodeURIComponent(category)}`}
+            >
+              ⚙ 管理本类型号
+            </Link>
+          )}
+          <button
+            type="button"
+            className="inb-btn"
+            onClick={() =>
+              downloadCsv(
+                `/parts/import-template.csv?category=${encodeURIComponent(category)}`,
+                `${category}_入库模板.csv`,
+              ).catch((e) => setError(e.message))
+            }
+          >
+            📄 下载模板
+          </button>
+          <button
+            type="button"
+            className="inb-btn"
+            onClick={() =>
+              downloadCsv(
+                `/parts/export.csv?category=${encodeURIComponent(category)}`,
+                `${category}_台账导出.csv`,
+              ).catch((e) => setError(e.message))
+            }
+          >
+            📤 批量导出
+          </button>
+          <button
+            type="button"
+            className={`inb-btn ${showImport ? 'is-on' : ''}`}
+            onClick={() => setShowImport((v) => !v)}
+          >
+            📥 {showImport ? '收起批量导入' : '批量导入（CSV）'}
+          </button>
+        </div>
+      </div>
+      {showImport && (
+        <div className="panel" style={{ marginTop: '0.25rem' }}>
+          <h3>{category} · 批量入库</h3>
+          <p className="muted">
+            下载本类模板填写（服务器原装行只需关联服务器，合同信息自动带出）；上传后逐行校验预览，全部通过才能确认入库。
+          </p>
+          <ImportWizard
+            templateUrl={`/parts/import-template.csv?category=${encodeURIComponent(category)}`}
+            exportUrl={`/parts/export.csv?category=${encodeURIComponent(category)}`}
+            importUrl="/parts/batch-import"
+            previewCols={[
+              { key: 'fixed_asset_no', label: '固定资产编号' },
+              { key: 'model_name', label: '型号名称' },
+              { key: 'source_type', label: '来源' },
+              { key: 'server_asset_no', label: '关联服务器' },
+              { key: 'location', label: '存放位置' },
+            ]}
+            onCommitted={() => {
+              setOk('批量入库成功')
+              setShowImport(false)
+              setTimeout(() => nav('/'), 800)
+            }}
+          />
+        </div>
+      )}
       {error && <div className="error">{error}</div>}
       {ok && <div className="ok-msg">{ok}</div>}
 
       {!categoryModels.length ? (
         <div className="error">
-          当前类型暂无型号，请先在
-          <Link to={`/part-models?category=${encodeURIComponent(category)}`}> 型号管理 </Link>
-          中新增后再入库。
+          当前类型暂无型号，请先联系管理员在型号管理中新增
+          {isAdmin && (
+            <>
+              （
+              <Link to={`/part-models?category=${encodeURIComponent(category)}`}>
+                打开型号管理
+              </Link>
+              ）
+            </>
+          )}
+          后再入库。
         </div>
       ) : (
         <form onSubmit={onSubmit} className="inbound-form">
+          <fieldset className="fields-2col">
+            <legend>来源（先选来源，再填其余信息）</legend>
+            <label>
+              来源 *
+              <select value={form.source_type} onChange={set('source_type')} required>
+                {SOURCES.map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+            {isOriginal ? (
+              <label>
+                关联服务器 *
+                <select value={form.server_id} onChange={set('server_id')} required>
+                  <option value="">— 请选择服务器资产编号 —</option>
+                  {servers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.asset_no}（{s.room || '-'} / {s.run_status}）
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label>
+                存放位置 *
+                <select value={form.storage_location_id} onChange={set('storage_location_id')} required>
+                  {locs.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.warehouse}/{l.slot}{l.location_type ? `（${l.location_type}）` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </fieldset>
+
+          {isOriginal && selectedServer && (
+            <fieldset className="fields-2col">
+              <legend>由服务器档案带出（只读）</legend>
+              <RoField label="存放位置" value={[selectedServer.room, selectedServer.rack, selectedServer.u_position].filter(Boolean).join(' / ')} />
+              <RoField label="运维部门" value={selectedServer.responsible_group} />
+              <RoField label="供应商" value={selectedServer.supplier} />
+              <RoField label="所属项目" value={selectedServer.project} />
+              <RoField label="产权单位" value={selectedServer.owner_unit} />
+              <RoField label="维保到位时间" value={selectedServer.warranty_expiry} />
+              <RoField label="合同号" value={selectedServer.contract_no} />
+              <RoField label="设备到货日期" value={selectedServer.arrival_date} />
+            </fieldset>
+          )}
+
+          {!isOriginal && (
+            <fieldset className="fields-2col">
+              <legend>采购与归属</legend>
+              <label>
+                运维部门 *
+                <select value={form.responsible_group} onChange={set('responsible_group')}>
+                  {GROUPS.map((g) => (
+                    <option key={g}>{g}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                供应商 *
+                <select value={form.supplier} onChange={set('supplier')} required>
+                  <option value="">— 请选择 —</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.name}>{s.name}</option>
+                  ))}
+                </select>
+                {!suppliers.length && (
+                  <span className="muted">
+                    {' '}暂无名录，请先到 <Link to="/suppliers">供应商</Link> 维护
+                  </span>
+                )}
+              </label>
+              <label>
+                合同号 *
+                <input value={form.contract_no} onChange={set('contract_no')} required placeholder="如：HT-2026-001" />
+              </label>
+              <label>
+                所属项目 *
+                <input value={form.project} onChange={set('project')} required placeholder="如：2026年基础资源扩容" />
+              </label>
+              <label>
+                产权单位 *
+                <input value={form.owner_unit} onChange={set('owner_unit')} required placeholder="本单位信息中心" />
+              </label>
+              <label>
+                采购日期 *
+                <input type="date" value={form.purchase_date} onChange={set('purchase_date')} required />
+              </label>
+              <label>
+                维保到位时间 *
+                <input type="date" value={form.warranty_expiry} onChange={set('warranty_expiry')} required />
+              </label>
+            </fieldset>
+          )}
+
           <fieldset className="fields-1col">
             <legend>型号与规格</legend>
             <label>
               选择型号 *
-              <select
-                value={form.model_id}
-                onChange={(e) => setForm({ ...form, model_id: e.target.value })}
-                required
-              >
+              <select value={form.model_id} onChange={set('model_id')} required>
                 <option value="">请选择</option>
                 {categoryModels.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -231,166 +432,26 @@ export default function Inbound() {
             <legend>实物信息</legend>
             <label>
               固定资产编号 *
-              <input
-                value={form.fixed_asset_no}
-                onChange={(e) => setForm({ ...form, fixed_asset_no: e.target.value })}
-                required
-                placeholder="FA-XXX-0000"
-              />
+              <input value={form.fixed_asset_no} onChange={set('fixed_asset_no')} required placeholder="FA-XXX-0000" />
             </label>
             <label>
-              厂商序列号 SN *
-              <input
-                value={form.serial_no}
-                onChange={(e) => setForm({ ...form, serial_no: e.target.value })}
-                required
-                placeholder="如：SN-MEM-1001"
-              />
+              设备序列（SN）号 *
+              <input value={form.serial_no} onChange={set('serial_no')} required placeholder="如：SN-MEM-1001" />
             </label>
             <label>
-              存放位置 *
-              <select
-                value={form.storage_location_id}
-                onChange={(e) => setForm({ ...form, storage_location_id: e.target.value })}
-                required
-              >
-                {locs.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.warehouse}/{l.slot}{l.location_type ? `（${l.location_type}）` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              来源 *
-              <select
-                value={form.source_type}
-                onChange={(e) => setForm({ ...form, source_type: e.target.value })}
-              >
-                <option>随器采购</option>
-                <option>单独合同</option>
-                <option>维保换新</option>
-              </select>
-            </label>
-            <label>
-              运维部门 *
-              <select
-                value={form.responsible_group}
-                onChange={(e) => setForm({ ...form, responsible_group: e.target.value })}
-              >
-                <option>基础组</option>
-                <option>运营组</option>
-                <option>网络组</option>
-                <option>平台组</option>
-              </select>
-            </label>
-            <label>
-              供应商 *
-              <select
-                value={form.supplier}
-                onChange={(e) => setForm({ ...form, supplier: e.target.value })}
-                required
-              >
-                <option value="">— 请选择 —</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.name}>{s.name}</option>
-                ))}
-              </select>
-              {!suppliers.length && (
-                <span className="muted">
-                  {' '}暂无名录，请先到 <Link to="/suppliers">供应商</Link> 维护
-                </span>
-              )}
-            </label>
-            <label>
-              所属项目 *
-              <input
-                value={form.project}
-                onChange={(e) => setForm({ ...form, project: e.target.value })}
-                required
-                placeholder="如：2026年基础资源扩容"
-              />
-            </label>
-            <label>
-              产权单位 *
-              <input
-                value={form.owner_unit}
-                onChange={(e) => setForm({ ...form, owner_unit: e.target.value })}
-                required
-                placeholder="本单位信息中心"
-              />
-            </label>
-            <label>
-              维保到期 *
-              <input
-                type="date"
-                value={form.warranty_expiry}
-                onChange={(e) => setForm({ ...form, warranty_expiry: e.target.value })}
-                required
-              />
+              采购金额 *
+              <input type="number" min="0" step="0.01" value={form.purchase_amount} onChange={set('purchase_amount')} required placeholder="0.00" />
             </label>
             <label>
               可调配标记 *
-              <select
-                value={form.allocatable_flag}
-                onChange={(e) => setForm({ ...form, allocatable_flag: e.target.value })}
-              >
+              <select value={form.allocatable_flag} onChange={set('allocatable_flag')}>
                 <option>通用可调</option>
                 <option>保留</option>
               </select>
             </label>
-            <label>
-              合同号 *
-              <input
-                value={form.contract_no}
-                onChange={(e) => setForm({ ...form, contract_no: e.target.value })}
-                required
-                placeholder="如：HT-2026-001"
-              />
-            </label>
-            <label>
-              采购金额 *
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.purchase_amount}
-                onChange={(e) => setForm({ ...form, purchase_amount: e.target.value })}
-                required
-                placeholder="0.00"
-              />
-            </label>
-            <label>
-              采购日期 *
-              <input
-                type="date"
-                value={form.purchase_date}
-                onChange={(e) => setForm({ ...form, purchase_date: e.target.value })}
-                required
-              />
-            </label>
-            <label>
-              敏感标记 *
-              <select
-                value={form.sensitivity}
-                onChange={(e) => setForm({ ...form, sensitivity: e.target.value })}
-                required
-              >
-                <option value="">— 请选择 —</option>
-                <option value="无">无</option>
-                <option value="管控">管控</option>
-                <option value="出口管制">出口管制</option>
-              </select>
-            </label>
             <label className="field-full">
               备注 *
-              <textarea
-                value={form.remark}
-                onChange={(e) => setForm({ ...form, remark: e.target.value })}
-                rows={2}
-                required
-                placeholder="入库事由/工单号等"
-              />
+              <textarea value={form.remark} onChange={set('remark')} rows={2} required placeholder="入库事由/工单号等" />
             </label>
           </fieldset>
 

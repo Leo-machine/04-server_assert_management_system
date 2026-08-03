@@ -58,14 +58,26 @@ def _validate_people(
     if applicant_id in approver_ids:
         raise BusinessError("审批回避：申请人不得出现在任何一级审批人中")
 
-    # 批量校验用户存在性，避免 N 次单独查询
     all_uids = [applicant_id, *approver_ids]
-    existing_uids = set(
-        db.scalars(select(User.id).where(User.id.in_(all_uids))).all()
-    )
-    missing = [uid for uid in all_uids if uid not in existing_uids]
+    users = {
+        u.id: u
+        for u in db.scalars(select(User).where(User.id.in_(all_uids))).all()
+    }
+    missing = [uid for uid in all_uids if uid not in users]
     if missing:
         raise BusinessError(f"用户不存在: {missing}")
+
+    # 轻量权限：审批人须具备审批人/管理员角色
+    bad = [
+        f"{users[uid].name}（{users[uid].role or '无角色'}）"
+        for uid in approver_ids
+        if (users[uid].role or "") not in enums.APPROVER_ROLES
+    ]
+    if bad:
+        raise BusinessError(
+            "审批人须为「审批人」或「管理员」角色，下列用户不符合："
+            + "、".join(bad)
+        )
 
 
 def _require_dest_org(db: Session, dest_org_id: Optional[int]) -> None:
@@ -198,13 +210,14 @@ def create_scrap_approval(
     part = db.get(Part, part_id)
     if part is None:
         raise BusinessError("配件不存在")
-    # 高值/敏感件报废必须留影像证据（「无」不算敏感）
+    # 高值件（算力卡类）报废必须留影像证据（设计 6.3 防掉包，按配件类型判断）
     if (
-        part.sensitivity in enums.SENSITIVITY_REQUIRE_SCRAP_ATTACHMENT
+        part.model
+        and part.model.category in enums.SCRAP_ATTACHMENT_CATEGORIES
         and not (attachment_ref or "").strip()
     ):
         raise BusinessError(
-            f"该配件为「{part.sensitivity}」件，报废必须提供影像证据（attachment_ref）"
+            f"该配件为「{part.model.category}」高值件，报废必须提供影像证据（attachment_ref）"
         )
     return _create_approval(
         db,

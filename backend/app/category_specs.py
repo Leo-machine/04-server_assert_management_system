@@ -21,7 +21,13 @@ PART_CATEGORIES = (
     "算力卡",
 )
 
+# 服务器整机：只在型号/品牌目录中管理（供服务器建档引用），不走配件入库
+SERVER_CATEGORY = "服务器"
+ALL_MANAGED_CATEGORIES = PART_CATEGORIES + (SERVER_CATEGORY,)
+
 # key: 字段名；type: number|string|enum；required；options 用于 enum；unit 仅展示
+# strict: True 表示必须从 options 中取值（驱动聚合列/正式列的字段），
+#         缺省为 False 表示 options 仅建议值、接受自定义输入
 CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
     "内存": [
         {"key": "容量GB", "label": "容量", "type": "number", "required": True, "unit": "GB"},
@@ -30,9 +36,9 @@ CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
             "label": "代际",
             "type": "enum",
             "required": True,
+            "strict": True,
             "options": ["DDR4", "DDR5"],
         },
-        # 频率等深参数可选进 spec；聚合不依赖它（也可写在 model_name）
         {"key": "频率MHz", "label": "频率", "type": "number", "required": False, "unit": "MHz"},
     ],
     "机械硬盘": [
@@ -42,6 +48,7 @@ CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
             "label": "接口",
             "type": "enum",
             "required": True,
+            "strict": True,
             "options": ["SATA", "SAS"],
         },
         {
@@ -59,6 +66,7 @@ CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
             "label": "接口协议",
             "type": "enum",
             "required": True,
+            "strict": True,
             "options": ["SATA", "SAS", "NVMe"],
         },
         {
@@ -86,6 +94,7 @@ CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
             "label": "速率",
             "type": "enum",
             "required": True,
+            "strict": True,
             "options": ["1G", "10G", "25G", "40G", "100G", "200G", "400G"],
         },
         {
@@ -93,6 +102,7 @@ CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
             "label": "模块类型",
             "type": "enum",
             "required": True,
+            "strict": True,
             "options": ["多模SR", "单模LR", "DAC", "AOC"],
         },
         {
@@ -100,6 +110,7 @@ CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
             "label": "厂商兼容",
             "type": "enum",
             "required": True,
+            "strict": True,
             "options": ["通用", "华为", "思科", "H3C"],
         },
     ],
@@ -109,6 +120,7 @@ CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
             "label": "速率",
             "type": "enum",
             "required": True,
+            "strict": True,
             "options": ["1G", "10G", "25G", "40G", "100G"],
         },
         {
@@ -116,6 +128,7 @@ CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
             "label": "口型",
             "type": "enum",
             "required": True,
+            "strict": True,
             "options": ["电口", "光口"],
         },
         {"key": "端口数", "label": "端口数", "type": "number", "required": True},
@@ -126,6 +139,7 @@ CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
             "label": "子类型",
             "type": "enum",
             "required": True,
+            "strict": True,
             "options": ["SAS-HBA", "FC-HBA"],
         },
         {
@@ -133,6 +147,7 @@ CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
             "label": "速率",
             "type": "enum",
             "required": True,
+            "strict": True,
             "options": ["8G", "16G", "32G", "12G-SAS", "24G-SAS"],
         },
         {"key": "端口数", "label": "端口数", "type": "number", "required": True},
@@ -144,6 +159,7 @@ CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
             "label": "封装",
             "type": "enum",
             "required": True,
+            "strict": True,
             "options": ["PCIe", "SXM"],
         },
         {
@@ -154,20 +170,28 @@ CATEGORY_SPEC_FIELDS: dict[str, list[dict[str, Any]]] = {
             "placeholder": "如 Ampere / Hopper",
         },
     ],
+    "服务器": [
+        {"key": "机型高度U", "label": "机型高度", "type": "number", "required": True, "unit": "U"},
+        {"key": "CPU型号", "label": "CPU 型号", "type": "string", "required": False, "placeholder": "如 Kunpeng 920 / Xeon Gold 6430"},
+        {"key": "CPU颗数", "label": "CPU 颗数", "type": "number", "required": False},
+        {"key": "内存插槽数", "label": "内存插槽数", "type": "number", "required": False},
+        {"key": "盘位数", "label": "盘位数", "type": "number", "required": False},
+        {"key": "电源功率W", "label": "电源功率", "type": "number", "required": False, "unit": "W"},
+    ],
 }
 
 
 def categories_schema() -> list[dict[str, Any]]:
     return [
         {"category": cat, "fields": CATEGORY_SPEC_FIELDS[cat]}
-        for cat in PART_CATEGORIES
+        for cat in ALL_MANAGED_CATEGORIES
     ]
 
 
 def validate_category(category: str) -> None:
-    if category not in PART_CATEGORIES:
+    if category not in ALL_MANAGED_CATEGORIES:
         raise SpecValidationError(
-            f"非法配件类型「{category}」，允许：{' / '.join(PART_CATEGORIES)}"
+            f"非法配件类型「{category}」，允许：{' / '.join(ALL_MANAGED_CATEGORIES)}"
         )
 
 
@@ -200,15 +224,17 @@ def validate_and_normalize_spec(category: str, spec: Optional[dict]) -> dict:
             cleaned[key] = int(num) if num == int(num) else num
         elif ftype == "enum":
             options = field.get("options") or []
+            strict = field.get("strict", False)
             sval = str(val).strip()
             if not sval:
                 if field.get("required"):
                     raise SpecValidationError(f"「{category}」规格缺少必填字段：{label}")
                 continue
-            # 在预定义列表中直接通过；否则作为自定义值（非空即可）
-            if sval not in options:
-                if field.get("required") and len(sval) < 1:
-                    raise SpecValidationError(f"「{label}」取值非法")
+            # strict: 必须从 options 中取值（驱动聚合/正式列）
+            if strict and sval not in options:
+                raise SpecValidationError(
+                    f"「{label}」取值非法：{sval}，允许：{' / '.join(options)}"
+                )
             cleaned[key] = sval
         else:
             cleaned[key] = str(val).strip()

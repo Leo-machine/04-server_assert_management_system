@@ -1,19 +1,37 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import enums
 from ..database import get_db
+from ..deps import get_current_user, require_role
 from ..models import ExternalOrg, Server, User
 from ..schemas import (
     ExternalOrgOut,
+    ServerIn,
     ServerOut,
     ServerRunStatusIn,
+    ServerUpdateIn,
     UserOut,
 )
 from ..services.movement import BusinessError
 from ..services import parts as parts_service
+from ..services import servers as servers_service
 
 router = APIRouter(tags=["catalog"])
+
+
+class BatchImportIn(BaseModel):
+    content: str  # CSV 文本（UTF-8）
+
+
+def _csv_response(text: str, filename: str) -> Response:
+    return Response(
+        content=text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/users", response_model=list[UserOut])
@@ -26,11 +44,93 @@ def list_servers(db: Session = Depends(get_db)):
     return list(db.scalars(select(Server).order_by(Server.id)).all())
 
 
+@router.get("/servers/export.csv")
+def export_servers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _csv_response(servers_service.export_servers_csv(db), "servers_export.csv")
+
+
+@router.get("/servers/import-template.csv")
+def servers_import_template(current_user: User = Depends(get_current_user)):
+    return _csv_response(
+        servers_service.import_template_csv(), "servers_import_template.csv"
+    )
+
+
+@router.post("/servers/batch-import")
+def batch_import_servers(
+    body: BatchImportIn,
+    dry_run: bool = Query(True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """两段式批量导入：dry_run=true 校验预览；dry_run=false 整批通过才写入。"""
+    require_role(current_user, (enums.ROLE_ADMIN,))
+    try:
+        return servers_service.batch_import_servers(db, body.content, dry_run=dry_run)
+    except BusinessError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+
+
+@router.get("/servers/{server_id}", response_model=ServerOut)
+def get_server(server_id: int, db: Session = Depends(get_db)):
+    server = db.get(Server, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="服务器不存在")
+    return server
+
+
+@router.post("/servers", response_model=ServerOut)
+def create_server(
+    body: ServerIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_role(current_user, (enums.ROLE_ADMIN,))
+    try:
+        return servers_service.create_server(db, **body.model_dump())
+    except BusinessError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+
+
+@router.put("/servers/{server_id}", response_model=ServerOut)
+def update_server(
+    server_id: int,
+    body: ServerUpdateIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_role(current_user, (enums.ROLE_ADMIN,))
+    try:
+        return servers_service.update_server(
+            db, server_id, **body.model_dump(exclude_unset=True)
+        )
+    except BusinessError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+
+
+@router.delete("/servers/{server_id}")
+def delete_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_role(current_user, (enums.ROLE_ADMIN,))
+    try:
+        servers_service.delete_server(db, server_id)
+    except BusinessError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+    return {"ok": True}
+
+
 @router.patch("/servers/{server_id}/run-status", response_model=ServerOut)
 def patch_run_status(
     server_id: int,
     body: ServerRunStatusIn,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         return parts_service.set_server_run_status(db, server_id, body.run_status)

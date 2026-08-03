@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import get_operator_id, require_user
+from .. import enums
+from ..deps import get_current_user, require_role
+from ..models import User
 from ..schemas import (
     StocktakeCheckIn,
     StocktakeConfirmExternalIn,
@@ -48,9 +50,10 @@ def _stocktake_out(st) -> StocktakeOut:
 def create_stocktake(
     body: StocktakeCreateIn,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    operator_id = current_user.id
+    require_role(current_user, enums.APPROVER_ROLES)
     try:
         st = stocktake_service.create_stocktake(
             db,
@@ -91,9 +94,9 @@ def check(
     stocktake_id: int,
     body: StocktakeCheckIn,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    operator_id = current_user.id
     try:
         item = stocktake_service.check_item(
             db,
@@ -111,9 +114,9 @@ def confirm_external(
     stocktake_id: int,
     body: StocktakeConfirmExternalIn,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    operator_id = current_user.id
     try:
         item = stocktake_service.confirm_external(
             db,
@@ -139,9 +142,10 @@ def discrepancies(stocktake_id: int, db: Session = Depends(get_db)):
 def complete(
     stocktake_id: int,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    operator_id = current_user.id
+    require_role(current_user, enums.APPROVER_ROLES)
     try:
         st = stocktake_service.complete_stocktake(
             db, stocktake_id=stocktake_id, operator_id=operator_id

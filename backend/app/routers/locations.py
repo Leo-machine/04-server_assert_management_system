@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import get_operator_id, require_user
+from .. import enums
+from ..deps import get_current_user, require_role
+from ..models import User
 from ..schemas import (
     LocationDistributionOut,
     StorageLocationIn,
@@ -34,9 +36,9 @@ def distribution(db: Session = Depends(get_db)):
 def create_location(
     body: StorageLocationIn,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    require_role(current_user, (enums.ROLE_ADMIN,))
     try:
         return locations_service.create_location(db, **body.model_dump())
     except BusinessError as e:
@@ -48,9 +50,9 @@ def update_location(
     location_id: int,
     body: StorageLocationUpdateIn,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    require_role(current_user, (enums.ROLE_ADMIN,))
     try:
         return locations_service.update_location(
             db, location_id, **body.model_dump(exclude_unset=True)
@@ -63,9 +65,9 @@ def update_location(
 def delete_location(
     location_id: int,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    require_role(current_user, (enums.ROLE_ADMIN,))
     try:
         locations_service.delete_location(db, location_id)
     except BusinessError as e:

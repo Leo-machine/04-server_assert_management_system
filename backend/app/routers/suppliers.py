@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import get_operator_id, require_user
+from .. import enums
+from ..deps import get_current_user, require_role
+from ..models import User
 from ..schemas import SupplierIn, SupplierOut, SupplierUpdateIn
 from ..services.movement import BusinessError
 from ..services import suppliers as suppliers_service
@@ -19,9 +21,9 @@ def list_suppliers(db: Session = Depends(get_db)):
 def create_supplier(
     body: SupplierIn,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    require_role(current_user, (enums.ROLE_ADMIN,))
     try:
         return suppliers_service.create_supplier(db, **body.model_dump())
     except BusinessError as e:
@@ -33,9 +35,9 @@ def update_supplier(
     supplier_id: int,
     body: SupplierUpdateIn,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    require_role(current_user, (enums.ROLE_ADMIN,))
     payload = body.model_dump(exclude_unset=True)
     try:
         return suppliers_service.update_supplier(
@@ -57,9 +59,9 @@ def update_supplier(
 def delete_supplier(
     supplier_id: int,
     db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    require_role(current_user, (enums.ROLE_ADMIN,))
     try:
         suppliers_service.delete_supplier(db, supplier_id)
     except BusinessError as e:

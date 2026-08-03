@@ -7,8 +7,10 @@ from pydantic import BaseModel, Field
 
 class UserOut(BaseModel):
     id: int
+    username: Optional[str] = None
     name: str
     role_label: Optional[str] = None
+    role: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -47,6 +49,7 @@ class CategoryFieldOut(BaseModel):
     label: str
     type: str
     required: bool = False
+    strict: bool = False
     options: Optional[list[str]] = None
     unit: Optional[str] = None
     placeholder: Optional[str] = None
@@ -111,6 +114,51 @@ class ServerOut(BaseModel):
     u_position: Optional[str] = None
     responsible_group: Optional[str] = None
     run_status: str
+    supplier: Optional[str] = None
+    contract_no: Optional[str] = None
+    project: Optional[str] = None
+    owner_unit: Optional[str] = None
+    warranty_expiry: Optional[date] = None
+    arrival_date: Optional[date] = None
+    purchase_amount: Optional[Decimal] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ServerIn(BaseModel):
+    asset_no: str
+    run_status: str = "未投运"
+    model: Optional[str] = None
+    serial_no: Optional[str] = None
+    room: Optional[str] = None
+    rack: Optional[str] = None
+    u_position: Optional[str] = None
+    responsible_group: Optional[str] = None
+    supplier: Optional[str] = None
+    contract_no: Optional[str] = None
+    project: Optional[str] = None
+    owner_unit: Optional[str] = None
+    warranty_expiry: Optional[date] = None
+    arrival_date: Optional[date] = None
+    purchase_amount: Optional[Decimal] = None
+
+
+class ServerUpdateIn(BaseModel):
+    asset_no: Optional[str] = None
+    run_status: Optional[str] = None
+    model: Optional[str] = None
+    serial_no: Optional[str] = None
+    room: Optional[str] = None
+    rack: Optional[str] = None
+    u_position: Optional[str] = None
+    responsible_group: Optional[str] = None
+    supplier: Optional[str] = None
+    contract_no: Optional[str] = None
+    project: Optional[str] = None
+    owner_unit: Optional[str] = None
+    warranty_expiry: Optional[date] = None
+    arrival_date: Optional[date] = None
+    purchase_amount: Optional[Decimal] = None
 
     model_config = {"from_attributes": True}
 
@@ -169,20 +217,24 @@ class MovementOut(BaseModel):
 class InboundIn(BaseModel):
     model_id: int
     fixed_asset_no: str
-    storage_location_id: int
     source_type: str
-    responsible_group: str  # 运维部门
     serial_no: str
-    contract_no: str
     purchase_amount: Decimal
-    purchase_date: date
-    sensitivity: str
-    supplier: str
-    project: str
-    owner_unit: str
-    warranty_expiry: date
     allocatable_flag: str
     remark: str
+    # 独立合同采购/框招正偏移：必填（服务端校验）
+    storage_location_id: Optional[int] = None
+    responsible_group: Optional[str] = None  # 运维部门
+    contract_no: Optional[str] = None
+    purchase_date: Optional[date] = None
+    supplier: Optional[str] = None
+    project: Optional[str] = None
+    owner_unit: Optional[str] = None
+    warranty_expiry: Optional[date] = None
+    # 服务器原装：必填（服务端校验），其余合同字段由服务器档案带出
+    server_id: Optional[int] = None
+    # 敏感标记已从表单去除；列保留兼容，默认「无」
+    sensitivity: Optional[str] = None
 
 
 class PartPublicUpdateIn(BaseModel):

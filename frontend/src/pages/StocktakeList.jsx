@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '../api'
+import { api, getStoredUser } from '../api'
 import ListToolbar from '../components/ListToolbar'
 import { filterByQuery } from '../lib/fuzzy'
+
+const CAN_MANAGE = new Set(['审批人', '管理员'])
 
 export default function StocktakeList() {
   const [list, setList] = useState([])
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [query, setQuery] = useState('')
+  const canManage = CAN_MANAGE.has(getStoredUser()?.role || '')
 
   function load() {
     return api.get('/stocktakes').then(setList).catch((e) => setError(e.message))
@@ -45,10 +48,17 @@ export default function StocktakeList() {
   return (
     <div className="panel">
       <h2>盘点任务</h2>
-      <p className="muted">纯发现层：冻结快照后清点/函证，不改配件状态与履历。</p>
+      <p className="muted">
+        纯发现层：冻结快照后清点/函证，不改配件状态与履历。
+        {!canManage && ' 发起/结案需审批人或管理员账号。'}
+      </p>
       {error && <div className="error">{error}</div>}
       {msg && <div className="ok-msg">{msg}</div>}
-      <button type="button" onClick={createFull}>发起全盘</button>
+      {canManage ? (
+        <button type="button" onClick={createFull}>发起全盘</button>
+      ) : (
+        <p className="muted">当前角色不可发起盘点，请使用审批人（如 lizz）登录。</p>
+      )}
 
       <ListToolbar
         query={query}

@@ -1,6 +1,7 @@
 """Demo 03：可调余量口径与公共字段。"""
 
 from app import enums
+from tests.conftest import op_headers
 
 
 def _mem_row(rows):
@@ -45,7 +46,7 @@ def test_reserve_flag_reduces_count(client):
     r = client.patch(
         f"/api/parts/{target['id']}",
         json={"allocatable_flag": enums.ALLOC_RESERVED},
-        headers={"X-Operator-Id": "1"},
+        headers=op_headers(1),
     )
     assert r.status_code == 200
     assert r.json()["allocatable_flag"] == enums.ALLOC_RESERVED
@@ -63,7 +64,7 @@ def test_alloc_flag_blocked_when_not_in_stock(client):
     r = client.patch(
         f"/api/parts/{in_use['id']}",
         json={"allocatable_flag": enums.ALLOC_RESERVED},
-        headers={"X-Operator-Id": "1"},
+        headers=op_headers(1),
     )
     assert r.status_code == 400
     assert "在库" in r.json()["detail"]
@@ -82,7 +83,7 @@ def test_install_reduces_allocatable(client):
     r = client.post(
         f"/api/parts/{target['id']}/install",
         json={"server_id": idle["id"], "slot": "DIMM_B1"},
-        headers={"X-Operator-Id": "1"},
+        headers=op_headers(1),
     )
     assert r.status_code == 200
     assert r.json()["current_status"] == enums.STATUS_IN_USE
@@ -101,7 +102,7 @@ def test_inbound_public_fields_and_invalid_flag(client):
     base = {
         "model_id": mem["id"],
         "storage_location_id": locs[0]["id"],
-        "source_type": "单独合同",
+        "source_type": "独立合同采购",
         "responsible_group": "基础组",
         "serial_no": "SN-TEST-001",
         "contract_no": "HT-TEST-001",
@@ -119,14 +120,14 @@ def test_inbound_public_fields_and_invalid_flag(client):
     bad = client.post(
         "/api/parts/inbound",
         json={**base, "fixed_asset_no": "FA-MEM-BAD-FLAG", "allocatable_flag": "随便调"},
-        headers={"X-Operator-Id": "1"},
+        headers=op_headers(1),
     )
     assert bad.status_code == 400
 
     ok = client.post(
         "/api/parts/inbound",
         json={**base, "fixed_asset_no": "FA-MEM-NEW-9001"},
-        headers={"X-Operator-Id": "1"},
+        headers=op_headers(1),
     )
     assert ok.status_code == 200
     body = ok.json()
@@ -151,7 +152,7 @@ def test_memory_model_syncs_aggregate_columns(client):
             "brand": "测试",
             "spec": {"容量GB": 64, "内存类型": "DDR5", "频率MHz": 4800},
         },
-        headers={"X-Operator-Id": "1"},
+        headers=op_headers(1),
     )
     assert r.status_code == 200
     body = r.json()

@@ -24,6 +24,8 @@ const NAME_TEMPLATES = {
     [brand, spec['子类型'], spec['速率'], spec['端口数'] ? `${spec['端口数']}口` : ''].filter(Boolean).join(' '),
   算力卡: (brand, spec) =>
     [brand, spec['显存GB'] ? `${spec['显存GB']}GB` : '', spec['封装'], spec['架构']].filter(Boolean).join(' '),
+  服务器: (brand, spec) =>
+    [brand, spec['机型高度U'] ? `${spec['机型高度U']}U` : '', spec['CPU型号'], '服务器'].filter(Boolean).join(' '),
 }
 
 const emptyForm = {

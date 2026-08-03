@@ -23,10 +23,15 @@ class User(Base):
     __tablename__ = "user"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # 登录账号（唯一；早期版本用 name 登录，迁移时由 name 回填）
+    username: Mapped[Optional[str]] = mapped_column(
+        String(50), unique=True, nullable=True
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     role_label: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    # 轻量权限角色：操作员 / 审批人 / 管理员（服务端硬校验）
+    # 轻量权限角色：操作员 / 审批人 / 管理员（发起审批时校验审批人角色）
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="操作员")
+    password_hash: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
 
 
 class PartModel(Base):
@@ -106,6 +111,18 @@ class Server(Base):
     u_position: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     responsible_group: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     run_status: Mapped[str] = mapped_column(String(50), nullable=False)
+    # 合同/采购信息（服务器原装入库时带出给配件）
+    supplier: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    contract_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    project: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    owner_unit: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # 维保到位时间
+    warranty_expiry: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # 设备到货日期
+    arrival_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    purchase_amount: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(12, 2), nullable=True
+    )
 
     links: Mapped[list["PartServerLink"]] = relationship(back_populates="server")
 

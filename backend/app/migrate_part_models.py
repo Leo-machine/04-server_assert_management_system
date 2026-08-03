@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .category_specs import (
-    PART_CATEGORIES,
+    ALL_MANAGED_CATEGORIES,
     SpecValidationError,
     validate_and_normalize_spec,
 )
@@ -158,7 +158,7 @@ def migrate_legacy_part_models(db: Session) -> dict[str, Any]:
             row.category = new_cat
             renamed += 1
 
-        if row.category not in PART_CATEGORIES:
+        if row.category not in ALL_MANAGED_CATEGORIES:
             failed.append(
                 {
                     "id": row.id,

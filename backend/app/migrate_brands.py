@@ -24,13 +24,19 @@ DEFAULT_BRAND_CATEGORIES: dict[str, list[str]] = {
     "Intel": ["网卡", "算力卡"],
     "Broadcom": ["RAID卡", "HBA卡", "网卡"],
     "Mellanox": ["网卡"],
-    "华为": ["网卡", "光模块"],
-    "H3C": ["网卡", "光模块"],
+    "华为": ["网卡", "光模块", "服务器"],
+    "H3C": ["网卡", "光模块", "服务器"],
     "戴尔": [],
     "浪潮": [],
     "联想": [],
     "超微": [],
     "通用": [],
+}
+
+# 老库追加回填：品牌后续新增适用类型时并入已有列表（幂等）
+_BRAND_CATEGORY_APPEND: dict[str, list[str]] = {
+    "华为": ["服务器"],
+    "H3C": ["服务器"],
 }
 
 
@@ -91,12 +97,24 @@ def migrate_brands(db: Session) -> dict[str, Any]:
         b.categories = cats or None
         synced += 1
 
+    # 追加回填：已有列表中并入新增适用类型（幂等）
+    appended = 0
+    for name, extra in _BRAND_CATEGORY_APPEND.items():
+        b = by_name.get(name)
+        if b is None or b.categories is None:
+            continue  # None=全类可用，无需追加
+        missing = [c for c in extra if c not in b.categories]
+        if missing:
+            b.categories = list(b.categories) + missing
+            appended += 1
+
     db.commit()
-    if added or created or synced:
+    if added or created or synced or appended:
         logger.info(
-            "brands 迁移: added_col=%s created=%s synced=%s",
+            "brands 迁移: added_col=%s created=%s synced=%s appended=%s",
             added,
             created,
             synced,
+            appended,
         )
-    return {"added_col": added, "created": created, "synced": synced}
+    return {"added_col": added, "created": created, "synced": synced, "appended": appended}
