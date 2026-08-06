@@ -19,12 +19,19 @@ router = APIRouter(prefix="/approvals", tags=["approvals"])
 
 
 @router.get("", response_model=list[ApprovalOut])
-def list_approvals(db: Session = Depends(get_db)):
+def list_approvals(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     return approvals_service.list_approvals(db)
 
 
 @router.get("/{approval_id}", response_model=ApprovalOut)
-def get_approval(approval_id: int, db: Session = Depends(get_db)):
+def get_approval(
+    approval_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     try:
         return approvals_service.get_approval(db, approval_id)
     except BusinessError as e:
@@ -37,6 +44,7 @@ def create_loan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    require_role(current_user, enums.LOAN_RETURN_ROLES)
     operator_id = current_user.id
     try:
         return approvals_service.create_loan_approval(
@@ -58,6 +66,7 @@ def create_transfer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    require_role(current_user, enums.LOAN_RETURN_ROLES)
     operator_id = current_user.id
     try:
         return approvals_service.create_transfer_approval(
@@ -79,6 +88,7 @@ def create_scrap(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    require_role(current_user, enums.LOAN_RETURN_ROLES)
     operator_id = current_user.id
     try:
         return approvals_service.create_scrap_approval(
@@ -100,6 +110,7 @@ def withdraw(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    require_role(current_user, enums.LOAN_RETURN_ROLES)
     operator_id = current_user.id
     try:
         return approvals_service.withdraw_approval(

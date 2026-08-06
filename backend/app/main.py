@@ -9,6 +9,7 @@ from .migrate_demo03 import migrate_demo03
 from .migrate_part_models import migrate_legacy_part_models
 from .migrate_server_info import migrate_server_info
 from .migrate_source_types import migrate_source_types
+from .migrate_user_status import migrate_user_status
 from .migrate_suppliers import migrate_suppliers
 from .migrate_wave1 import migrate_wave1
 from .routers import (
@@ -39,8 +40,11 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        # 先迁移旧库列，再 seed（seed 会按当前 ORM 查询）
+        # 结构性迁移（ALTER 加列）必须最先跑——后续数据迁移/seed 按当前 ORM 查询
         migrate_wave1(db)
+        migrate_server_info(db)
+        migrate_user_status(db)
+        # 数据级迁移与 seed
         migrate_demo03(db)
         migrate_brands(db)
         seed_if_empty(db)
@@ -49,7 +53,6 @@ async def lifespan(app: FastAPI):
         migrate_demo03(db)
         migrate_brands(db)
         migrate_suppliers(db)
-        migrate_server_info(db)
         migrate_source_types(db)
     finally:
         db.close()

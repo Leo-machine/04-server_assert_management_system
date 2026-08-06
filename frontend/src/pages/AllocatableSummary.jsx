@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api } from '../api'
+import { Navigate } from 'react-router-dom'
+import { api, getStoredUser } from '../api'
 import ListToolbar from '../components/ListToolbar'
 import { filterByQuery } from '../lib/fuzzy'
+import { OPS_ROLES, hasRole, homePathFor } from '../lib/roles'
+import { PART_CATEGORIES } from '../lib/categories'
 
 const BAR_COLORS = ['#005a9c', '#0f766e', '#0369a1', '#1d4ed8', '#0a7ea4', '#0284c7']
 
-const ALL_CATEGORIES = ['内存', '机械硬盘', '固态硬盘', 'RAID卡', '光模块', '网卡', 'HBA卡', '算力卡']
-
 export default function AllocatableSummary() {
+  const me = getStoredUser()
+  const canView = hasRole(me, OPS_ROLES)
   const [rows, setRows] = useState([])
   const [category, setCategory] = useState('内存')
   const [error, setError] = useState('')
@@ -26,8 +29,9 @@ export default function AllocatableSummary() {
   }
 
   useEffect(() => {
+    if (!canView) return undefined
     load(category)
-  }, [category])
+  }, [category, canView])
 
   const visible = useMemo(
     () =>
@@ -51,6 +55,10 @@ export default function AllocatableSummary() {
     return { sorted, max, total, specs: sorted.length }
   }, [visible])
 
+  if (!canView) {
+    return <Navigate to={homePathFor(me)} replace />
+  }
+
   return (
     <div className="as-page">
       <header className="as-header">
@@ -64,7 +72,7 @@ export default function AllocatableSummary() {
           <label className="as-field">
             <span>品类</span>
             <select value={category} onChange={(e) => setCategory(e.target.value)}>
-              {ALL_CATEGORIES.map(
+              {PART_CATEGORIES.map(
                 (c) => (
                   <option key={c} value={c}>{c}</option>
                 ),

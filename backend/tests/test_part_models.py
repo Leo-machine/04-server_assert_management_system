@@ -32,7 +32,7 @@ def test_create_model_requires_spec_fields(client):
 
 def test_forbid_category_change_when_model_in_use(client, db_session):
     # 种子内存型号已被实物引用
-    mem = next(m for m in client.get("/api/part-models").json() if m["category"] == "内存")
+    mem = next(m for m in client.get("/api/part-models", headers=op_headers(1)).json() if m["category"] == "内存")
     r = client.put(
         f"/api/part-models/{mem['id']}",
         json={
@@ -70,7 +70,7 @@ def test_allow_category_change_when_unused(client):
 
 
 def test_update_name_does_not_require_respec(client, db_session):
-    mem = next(m for m in client.get("/api/part-models").json() if m["category"] == "内存")
+    mem = next(m for m in client.get("/api/part-models", headers=op_headers(1)).json() if m["category"] == "内存")
     before_spec = dict(mem["spec"])
     # 直接服务层：只改品牌，不传 spec
     updated = part_models_service.update_model(

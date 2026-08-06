@@ -18,6 +18,13 @@ _SERVER_NEW_COLS = [
     ("warranty_expiry", "DATE"),
     ("arrival_date", "DATE"),
     ("purchase_amount", "NUMERIC(12, 2)"),
+    ("disk_slot_count", "INTEGER"),
+    ("disk_interface", "VARCHAR(50)"),
+    ("mem_slot_count", "INTEGER"),
+    ("mem_ddr_gens", "VARCHAR(50)"),
+    ("pcie_slot_count", "INTEGER"),
+    ("nvme_slot_count", "INTEGER"),
+    ("nvme_interface", "VARCHAR(50)"),
 ]
 
 

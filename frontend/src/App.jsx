@@ -16,6 +16,7 @@ import Approvals from './pages/Approvals'
 import ReturnPart from './pages/ReturnPart'
 import History from './pages/History'
 import Servers from './pages/Servers'
+import ServerDetail from './pages/ServerDetail'
 import Brands from './pages/Brands'
 import Suppliers from './pages/Suppliers'
 import Locations from './pages/Locations'
@@ -23,16 +24,29 @@ import AllocatableSummary from './pages/AllocatableSummary'
 import StocktakeList from './pages/StocktakeList'
 import StocktakeDetail from './pages/StocktakeDetail'
 import Login from './pages/Login'
+import Register from './pages/Register'
+import Users from './pages/Users'
+import {
+  ROLE_SUPPLIER,
+  OPS_ROLES,
+  INBOUND_ROLES,
+  MASTER_DATA_ROLES,
+} from './lib/roles'
+
+const OPS = [...OPS_ROLES]
+const INBOUND = [...INBOUND_ROLES]
+const MASTER = [...MASTER_DATA_ROLES]
+const SERVER_NAV = [...OPS_ROLES, ROLE_SUPPLIER]
 
 const ALL_NAV_GROUPS = [
   {
     label: null,
-    roles: null,
+    roles: OPS,
     items: [{ to: '/dashboard', label: '首页概览', icon: '▣' }],
   },
   {
     label: '总览与库位',
-    roles: null,
+    roles: OPS,
     items: [
       { to: '/allocatable', label: '可调余量', icon: '📊' },
       { to: '/locations', label: '存放位置', icon: '📍' },
@@ -42,20 +56,21 @@ const ALL_NAV_GROUPS = [
     label: '出入库与流转',
     roles: null,
     items: [
-      { to: '/', label: '配件列表', icon: '📋' },
-      { to: '/inbound', label: '分类入库', icon: '📥' },
-      { to: '/approvals', label: '审批中心', icon: '✅' },
-      { to: '/stocktakes', label: '盘点管理', icon: '🔍' },
-      { to: '/servers', label: '服务器管理', icon: '🖥' },
+      { to: '/', label: '配件列表', icon: '📋', roles: OPS },
+      { to: '/inbound', label: '分类入库', icon: '📥', roles: INBOUND },
+      { to: '/approvals', label: '审批中心', icon: '✅', roles: OPS },
+      { to: '/stocktakes', label: '盘点管理', icon: '🔍', roles: OPS },
+      { to: '/servers', label: '服务器管理', icon: '🖥', roles: SERVER_NAV },
     ],
   },
   {
     label: '基础数据',
-    roles: ['管理员'],
+    roles: MASTER,
     items: [
       { to: '/part-models', label: '型号管理', icon: '⚙' },
       { to: '/brands', label: '品牌管理', icon: '🏷' },
-      { to: '/suppliers', label: '供应商', icon: '🏭' },
+      { to: '/suppliers', label: '供应商管理', icon: '🏭' },
+      { to: '/users', label: '用户管理', icon: '👤' },
     ],
   },
 ]
@@ -69,16 +84,48 @@ function AuthGuard({ children }) {
 }
 
 export default function App() {
-  const user = getStoredUser()
+  const [user, setUser] = useState(() => getStoredUser())
   const nav = useNavigate()
   const [collapsed, setCollapsed] = useState({})
   const location = useLocation()
 
+  // 启动/聚焦时刷新角色（以服务端为准）
+  useEffect(() => {
+    if (location.pathname === '/login' || location.pathname === '/register') return undefined
+    if (!getToken()) return undefined
+    let cancelled = false
+    function refresh() {
+      api.get('/auth/me')
+        .then((me) => {
+          if (cancelled) return
+          const next = {
+            user_id: me.user_id,
+            name: me.name,
+            username: me.username,
+            role: me.role,
+          }
+          setStoredUser(next)
+          setUser(next)
+        })
+        .catch(() => {
+          /* 401 由 api 层清会话跳转 */
+        })
+    }
+    refresh()
+    const onFocus = () => refresh()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [location.pathname])
+
   // 登录页不渲染侧边栏
-  if (location.pathname === '/login') {
+  if (location.pathname === '/login' || location.pathname === '/register') {
     return (
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
       </Routes>
     )
   }
@@ -88,12 +135,15 @@ export default function App() {
     return <Navigate to="/login" replace />
   }
 
-  // 按角色过滤导航
+  // 按角色过滤导航（组级 + 条目级）
   const role = user.role
-  const navGroups = ALL_NAV_GROUPS.filter((g) => {
-    if (!g.roles) return true
-    return g.roles.includes(role)
-  })
+  const navGroups = ALL_NAV_GROUPS
+    .filter((g) => !g.roles || g.roles.includes(role))
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((item) => !item.roles || item.roles.includes(role)),
+    }))
+    .filter((g) => g.items.length > 0)
 
   function toggleGroup(gi) {
     setCollapsed((prev) => ({ ...prev, [gi]: !prev[gi] }))
@@ -180,6 +230,7 @@ export default function App() {
               <Route path="/inbound" element={<Inbound />} />
               <Route path="/part-models" element={<PartModels />} />
               <Route path="/brands" element={<Brands />} />
+              <Route path="/users" element={<Users />} />
               <Route path="/suppliers" element={<Suppliers />} />
               <Route path="/parts/:id/install" element={<Install />} />
               <Route path="/parts/:id/uninstall" element={<Uninstall />} />
@@ -194,6 +245,7 @@ export default function App() {
               <Route path="/stocktakes" element={<StocktakeList />} />
               <Route path="/stocktakes/:id" element={<StocktakeDetail />} />
               <Route path="/servers" element={<Servers />} />
+              <Route path="/servers/:id" element={<ServerDetail />} />
               <Route path="/locations" element={<Locations />} />
               <Route path="/allocatable" element={<AllocatableSummary />} />
               <Route path="/login" element={<Login />} />

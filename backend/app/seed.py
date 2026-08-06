@@ -11,7 +11,6 @@ from .migrate_brands import DEFAULT_BRAND_CATEGORIES
 from .models import (
     Brand,
     ExternalOrg,
-    MovementLog,
     Part,
     PartModel,
     PartServerLink,
@@ -30,12 +29,13 @@ def seed_if_empty(db: Session) -> None:
     import hashlib
     pw = hashlib.sha256("123456".encode()).hexdigest()
     users = [
-        User(username="admin", name="admin", role_label="管理员", role=enums.ROLE_ADMIN, password_hash=pw),
-        User(username="zhangyw", name="张运维", role_label="运维", role=enums.ROLE_OPERATOR, password_hash=pw),
-        User(username="lizz", name="李组长", role_label="组长", role=enums.ROLE_APPROVER, password_hash=pw),
-        User(username="wangzg", name="王主管", role_label="主管", role=enums.ROLE_APPROVER, password_hash=pw),
-        User(username="zhaojl", name="赵经理", role_label="经理", role=enums.ROLE_APPROVER, password_hash=pw),
-        User(username="qiancg", name="钱仓管", role_label="仓管", role=enums.ROLE_OPERATOR, password_hash=pw),
+        User(username="admin", name="admin", role_label="管理员", role=enums.ROLE_LEADER, password_hash=pw),
+        User(username="zhangyw", name="张运维", role_label="主业运维", role=enums.ROLE_OPERATIONS, password_hash=pw),
+        User(username="lizz", name="李组长", role_label="领导", role=enums.ROLE_LEADER, password_hash=pw),
+        User(username="wangzg", name="王主管", role_label="领导", role=enums.ROLE_LEADER, password_hash=pw),
+        User(username="zhaojl", name="赵经理", role_label="领导", role=enums.ROLE_LEADER, password_hash=pw),
+        User(username="qiancg", name="钱仓管", role_label="设备供应商", role=enums.ROLE_SUPPLIER, password_hash=pw),
+        User(username="wawei", name="万维", role_label="外委运维", role=enums.ROLE_MAINTENANCE, password_hash=pw),
     ]
     db.add_all(users)
     db.flush()
@@ -139,36 +139,29 @@ def seed_if_empty(db: Session) -> None:
 
     servers = [
         Server(
-            asset_no="SRV-LIVE-001",
-            model="浪潮 NF5280M6",
-            room="A机房",
-            rack="A01",
-            u_position="10U",
-            responsible_group="基础组",
-            run_status=enums.RUN_LIVE,
-            supplier="浪潮信息",
-            contract_no="HT-2025-100",
-            project="2025年基础资源扩容",
-            owner_unit="本单位信息中心",
-            warranty_expiry=date(2028, 6, 30),
-            arrival_date=date(2025, 7, 1),
-            purchase_amount=Decimal("185000.00"),
+            asset_no="SRV-LIVE-001", model="浪潮 NF5280M6", serial_no="SN-SRV-001",
+            location_id=locs[1].id,  # A栋数据中心 Rack-B-03
+            responsible_group="基础组", run_status=enums.RUN_LIVE,
+            supplier="浪潮信息", contract_no="HT-2025-100", project="2025年基础资源扩容",
+            owner_unit="本单位信息中心", warranty_expiry=date(2028, 6, 30),
+            arrival_date=date(2025, 7, 1), purchase_amount=Decimal("185000.00"),
+            disk_slot_count=12, disk_interface="SAS", mem_slot_count=32,
+            mem_ddr_gens="DDR4", pcie_slot_count=8, nvme_slot_count=4, nvme_interface="U.2",
         ),
         Server(
-            asset_no="SRV-IDLE-002",
-            model="戴尔 R750",
-            room="B机房",
-            rack="B03",
-            u_position="20U",
-            responsible_group="运营组",
-            run_status=enums.RUN_NOT_LIVE,
-            supplier="戴尔（中国）",
-            contract_no="HT-2026-015",
-            project="2026年平台组资源池",
-            owner_unit="本单位信息中心",
-            warranty_expiry=date(2029, 1, 31),
-            arrival_date=date(2026, 2, 10),
-            purchase_amount=Decimal("162000.00"),
+            asset_no="SRV-IDLE-002", model="戴尔 R750", serial_no="SN-SRV-002",
+            location_id=locs[3].id,  # A栋数据中心 Rack-D-12
+            responsible_group="运营组", run_status=enums.RUN_NOT_LIVE,
+            supplier="戴尔（中国）", contract_no="HT-2026-015", project="2026年平台组资源池",
+            owner_unit="本单位信息中心", warranty_expiry=date(2029, 1, 31),
+            arrival_date=date(2026, 2, 10), purchase_amount=Decimal("162000.00"),
+            disk_slot_count=16,
+            disk_interface="混插",
+            mem_slot_count=32,
+            mem_ddr_gens="DDR4/DDR5",
+            pcie_slot_count=10,
+            nvme_slot_count=8,
+            nvme_interface="U.2",
         ),
     ]
     db.add_all(servers)

@@ -13,7 +13,10 @@ router = APIRouter(prefix="/suppliers", tags=["suppliers"])
 
 
 @router.get("", response_model=list[SupplierOut])
-def list_suppliers(db: Session = Depends(get_db)):
+def list_suppliers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     return suppliers_service.list_suppliers(db)
 
 
@@ -23,7 +26,7 @@ def create_supplier(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_role(current_user, (enums.ROLE_ADMIN,))
+    require_role(current_user, (enums.ROLE_LEADER,))
     try:
         return suppliers_service.create_supplier(db, **body.model_dump())
     except BusinessError as e:
@@ -37,7 +40,7 @@ def update_supplier(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_role(current_user, (enums.ROLE_ADMIN,))
+    require_role(current_user, (enums.ROLE_LEADER,))
     payload = body.model_dump(exclude_unset=True)
     try:
         return suppliers_service.update_supplier(
@@ -61,7 +64,7 @@ def delete_supplier(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_role(current_user, (enums.ROLE_ADMIN,))
+    require_role(current_user, (enums.ROLE_LEADER,))
     try:
         suppliers_service.delete_supplier(db, supplier_id)
     except BusinessError as e:

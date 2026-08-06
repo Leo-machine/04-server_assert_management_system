@@ -10,6 +10,7 @@ from app.migrate_brands import migrate_brands
 from app.migrate_demo03 import migrate_demo03
 from app.migrate_part_models import migrate_legacy_part_models
 from app.migrate_suppliers import migrate_suppliers
+from app.migrate_user_status import migrate_user_status
 from app.migrate_wave1 import migrate_wave1
 from app.seed import seed_if_empty
 
@@ -32,6 +33,7 @@ def db_session():
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
     migrate_wave1(db)
+    migrate_user_status(db)
     migrate_demo03(db)
     migrate_brands(db)
     seed_if_empty(db)
@@ -63,16 +65,20 @@ def client(db_session):
 def op_headers(user_id: int) -> dict:
     """测试登录态：铸造真实签名令牌（业务接口已不再接受 X-Operator-Id）。"""
     from app.deps import make_token
+    from app.models import User
 
-    class _U:
-        id = user_id
+    user = User(id=user_id)
+    return {"Authorization": f"Bearer {make_token(user)}"}
 
-    return {"Authorization": f"Bearer {make_token(_U())}"}
 
 
 def demo_cast(client) -> dict:
     """按姓名取演示角色，避免种子顺序变化导致下标错位。"""
-    by_name = {u["name"]: u for u in client.get("/api/users").json()}
+    login = client.post("/api/auth/login", json={"username": "zhangyw", "password": "123456"})
+    assert login.status_code == 200, login.text
+    token = login.json()["token"]
+    h = {"Authorization": f"Bearer {token}"}
+    by_name = {u["name"]: u for u in client.get("/api/users", headers=h).json()}
     required = ("张运维", "李组长", "王主管", "赵经理", "钱仓管")
     missing = [n for n in required if n not in by_name]
     assert not missing, f"种子用户缺失: {missing}"
@@ -82,11 +88,12 @@ def demo_cast(client) -> dict:
         "a2": by_name["王主管"],
         "a3": by_name["赵经理"],
         "other": by_name["钱仓管"],
-        "admin": by_name.get("admin"),
+        "admin": by_name.get("admin") or by_name.get("系统管理员"),
         "approver_ids": [
             by_name["李组长"]["id"],
             by_name["王主管"]["id"],
             by_name["赵经理"]["id"],
         ],
         "users": list(by_name.values()),
+        "headers": h,
     }

@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import enums
+from ..category_specs import PART_CATEGORIES
 from ..models import Part, PartModel
 
 # 品类 → 规格分组维度（PartModel 正式列）。未注册的品类回退为按型号聚合。
@@ -15,17 +16,7 @@ CATEGORY_GROUP_DIMS: dict[str, tuple[str, ...]] = {
     "内存": ("capacity_gb", "ddr_gen"),
 }
 
-# 可调余量页品类下拉（八类全集）
-ALL_CATEGORIES = (
-    "内存",
-    "机械硬盘",
-    "固态硬盘",
-    "RAID卡",
-    "光模块",
-    "网卡",
-    "HBA卡",
-    "算力卡",
-)
+ALL_CATEGORIES = PART_CATEGORIES
 
 
 def allocatable_summary(

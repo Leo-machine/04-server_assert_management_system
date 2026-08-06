@@ -1,22 +1,14 @@
 import { useEffect, useState } from 'react'
 import { getOperatorId } from '../api'
+import { APPROVER_ROLES } from '../lib/roles'
 
-const APPROVER_ROLES = new Set(['审批人', '管理员'])
-
-/** 优先「审批人」，管理员放最后，避免默认 L1 落到 admin */
 function approverCandidates(users, operatorId) {
-  const list = users.filter(
-    (u) => u.id !== operatorId && APPROVER_ROLES.has(u.role || ''),
-  )
-  return list.sort((a, b) => {
-    const ra = a.role === '审批人' ? 0 : 1
-    const rb = b.role === '审批人' ? 0 : 1
-    if (ra !== rb) return ra - rb
-    return (a.id || 0) - (b.id || 0)
-  })
+  return users
+    .filter((u) => u.id !== operatorId && APPROVER_ROLES.has(u.role || ''))
+    .sort((a, b) => (a.id || 0) - (b.id || 0))
 }
 
-// 三级审批人三连选：默认取三位「审批人」（李/王/赵）
+// 三级审批人三连选：仅领导可担任审批人
 export default function ApproverSelects({ users, value, onChange }) {
   const operatorId = getOperatorId()
   const candidates = approverCandidates(users, operatorId)
@@ -39,7 +31,7 @@ export default function ApproverSelects({ users, value, onChange }) {
             required
           >
             {candidates.length === 0 && (
-              <option value="">暂无可用审批人</option>
+              <option value="">暂无可用领导审批人</option>
             )}
             {candidates.map((u) => (
               <option key={u.id} value={u.id}>

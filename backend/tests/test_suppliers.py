@@ -16,9 +16,9 @@ def test_supplier_crud_and_rename_cascade(client):
     assert r.status_code == 200
     sid = r.json()["id"]
 
-    models = client.get("/api/part-models").json()
+    models = client.get("/api/part-models", headers=op_headers(1)).json()
     mem = next(m for m in models if m["category"] == "内存")
-    locs = client.get("/api/storage-locations").json()
+    locs = client.get("/api/storage-locations", headers=op_headers(1)).json()
     inbound = client.post(
         "/api/parts/inbound",
         json={
@@ -49,7 +49,9 @@ def test_supplier_crud_and_rename_cascade(client):
         headers=op_headers(1),
     )
     assert r2.status_code == 200
-    part = client.get(f"/api/parts/{inbound.json()['id']}").json()
+    part = client.get(
+        f"/api/parts/{inbound.json()['id']}", headers=op_headers(1)
+    ).json()
     assert part["supplier"] == "测试供应商B"
 
     blocked = client.delete(f"/api/suppliers/{sid}", headers=op_headers(1))

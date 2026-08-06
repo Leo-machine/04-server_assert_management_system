@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, getStoredUser } from '../api'
-
-const ALL_CATEGORIES = [
-  '内存', '机械硬盘', '固态硬盘', 'RAID卡',
-  '光模块', '网卡', 'HBA卡', '算力卡',
-]
+import { isLeader } from '../lib/roles'
+import { ALL_MANAGED_CATEGORIES } from '../lib/categories'
 
 const LOCATION_TYPES = ['库房货架', '机房备件柜', '数据中心机柜', '其他']
 
@@ -29,7 +26,7 @@ export default function Locations() {
   const [editingId, setEditingId] = useState(null)
   const [error, setError] = useState('')
   const [ok, setOk] = useState('')
-  const isAdmin = getStoredUser()?.role === '管理员'
+  const isAdmin = isLeader(getStoredUser())
 
   async function load() {
     const [locs, dist] = await Promise.all([
@@ -213,7 +210,7 @@ export default function Locations() {
                   允许入库的配件类型（不选 = 通用，所有类型可入）
                 </div>
                 <div className="chip-row" style={{ margin: '0 0 0.5rem' }}>
-                  {ALL_CATEGORIES.map((cat) => (
+                  {ALL_MANAGED_CATEGORIES.map((cat) => (
                     <button
                       key={cat}
                       type="button"
@@ -236,7 +233,7 @@ export default function Locations() {
             </fieldset>
           </form>
         ) : (
-          <p className="muted">库位增删改仅管理员可操作；下方为只读列表与分布。</p>
+          <p className="muted">库位增删改仅领导可操作；下方为只读列表与分布。</p>
         )}
 
         <div>

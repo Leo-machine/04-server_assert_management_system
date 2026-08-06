@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, getStoredUser } from '../api'
+import { OPS_ROLES, hasRole } from '../lib/roles'
 
 function locText(kind, id) {
   if (!kind) return '—'
   return `${kind}#${id ?? '-'}`
 }
-
-const CAN_MANAGE = new Set(['审批人', '管理员'])
 
 export default function StocktakeDetail() {
   const { id } = useParams()
@@ -18,7 +17,7 @@ export default function StocktakeDetail() {
   const [scanNo, setScanNo] = useState('')
   const [actualLocId, setActualLocId] = useState('')
   const [feedback, setFeedback] = useState('')
-  const canManage = CAN_MANAGE.has(getStoredUser()?.role || '')
+  const canManage = hasRole(getStoredUser(), OPS_ROLES)
 
   async function load() {
     const [detail, locations] = await Promise.all([
@@ -247,7 +246,7 @@ export default function StocktakeDetail() {
       )}
       {inProgress && !canManage && (
         <p className="muted" style={{ marginTop: '1rem' }}>
-          结案需审批人或管理员账号。
+          结案需主业运维或领导账号。
         </p>
       )}
     </div>

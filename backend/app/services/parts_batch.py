@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -24,6 +24,7 @@ from ..models import (
     StorageLocation,
     Supplier,
 )
+from ..csv_util import csv_text, parse_date
 from .movement import BusinessError
 from . import parts as parts_service
 
@@ -64,28 +65,43 @@ _MANUAL_REQUIRED = (
 )
 
 
-def _csv_text(rows: list[list[str]]) -> str:
-    buf = io.StringIO()
-    w = csv.writer(buf, lineterminator="\r\n")
-    for r in rows:
-        w.writerow(r)
-    return "﻿" + buf.getvalue()
 
-
-def import_template_csv(category: Optional[str] = None) -> str:
+def import_template_csv(db: Session, category: Optional[str] = None) -> str:
+    """模板示例行使用库中真实数据（型号/兼容库位/供应商/服务器），
+    保证用户照示例填写即可通过校验，而不是占位符。"""
     cat = category or "内存"
+
+    model = db.scalars(
+        select(PartModel)
+        .where(PartModel.category == cat)
+        .order_by(PartModel.id)
+    ).first()
+    model_name = model.model_name if model else "（先在型号管理中维护本类型号）"
+
+    # 第一个兼容该品类的库位（无限制或显式包含）
+    loc_label = ""
+    for l in db.scalars(select(StorageLocation).order_by(StorageLocation.id)).all():
+        allowed = l.allowed_categories or []
+        if not allowed or cat in allowed:
+            loc_label = f"{l.warehouse}/{l.slot}"
+            break
+
+    supplier = db.scalars(select(Supplier.name).order_by(Supplier.id)).first() or ""
+    server = db.scalars(select(Server).order_by(Server.id)).first()
+    server_no = server.asset_no if server else ""
+
     example_original = [
-        cat, "（填型号库中的型号名称）", "FA-EXAMPLE-001", "SN-EXAMPLE-001",
-        "服务器原装", "SRV-LIVE-001", "", "", "", "", "", "", "", "",
+        cat, model_name, "FA-EXAMPLE-001", "SN-EXAMPLE-001",
+        "服务器原装", server_no, "", "", "", "", "", "", "", "",
         "800.00", "通用可调", "随服务器到货",
     ]
     example_contract = [
-        cat, "（填型号库中的型号名称）", "FA-EXAMPLE-002", "SN-EXAMPLE-002",
-        "独立合同采购", "", "库房A/架-01", "基础组", "（供应商名录中的名称）",
+        cat, model_name, "FA-EXAMPLE-002", "SN-EXAMPLE-002",
+        "独立合同采购", "", loc_label, "基础组", supplier,
         "HT-2026-001", "2026年资源扩容", "本单位信息中心", "2026-08-01",
         "2029-08-01", "800.00", "通用可调", "合同采购到货",
     ]
-    return _csv_text([[h for h, _ in CSV_COLUMNS], example_original, example_contract])
+    return csv_text([[h for h, _ in CSV_COLUMNS], example_original, example_contract])
 
 
 def export_parts_csv(
@@ -137,20 +153,8 @@ def export_parts_csv(
                 loc_label(p),
             ]
         )
-    return _csv_text(rows)
+    return csv_text(rows)
 
-
-def _parse_date(val: str, errors: list[str], header: str) -> Optional[date]:
-    """接受 YYYY-MM-DD 与 Excel/WPS 常见的 YYYY/M/D、YYYY.M.D。"""
-    if not val:
-        return None
-    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d"):
-        try:
-            return datetime.strptime(val, fmt).date()
-        except ValueError:
-            continue
-    errors.append(f"【{header}】「{val}」须为日期（如 2026-08-01）")
-    return None
 
 
 def parse_parts_csv(db: Session, content: str) -> dict:
@@ -199,9 +203,8 @@ def parse_parts_csv(db: Session, content: str) -> dict:
             errors.append("【配件类型】服务器整机请走「服务器管理」建档，不走配件入库")
 
         asset_no = cell(raw, "固定资产编号")
-        if not asset_no:
-            errors.append("【固定资产编号】必填")
-        else:
+        is_auto_asset = not asset_no
+        if not is_auto_asset:
             if asset_no in existing_nos:
                 errors.append(f"【固定资产编号】已存在：{asset_no}")
             if asset_no in seen_in_file:
@@ -294,8 +297,8 @@ def parse_parts_csv(db: Session, content: str) -> dict:
                 )
             if supplier and supplier not in supplier_names:
                 errors.append(f"【供应商】「{supplier}」不在名录中，请先维护")
-            purchase_date = _parse_date(cell(raw, "到货验收日期"), errors, "到货验收日期")
-            warranty = _parse_date(cell(raw, "维保到位时间"), errors, "维保到位时间")
+            purchase_date = parse_date(cell(raw, "到货验收日期"), errors, "到货验收日期")
+            warranty = parse_date(cell(raw, "维保到位时间"), errors, "维保到位时间")
 
         kwargs = {
             "model_id": model.id if model else None,
@@ -348,15 +351,41 @@ def batch_import_parts(
         bad = report["total"] - report["valid"]
         raise BusinessError(f"存在 {bad} 行校验未通过，整批未导入（请修正后重新上传）")
 
-    created_nos: list[str] = []
+    # 预生成：为未填固定资产编号的行自动生成（同一批次内互不冲突）
+    auto_gen_nos: set[str] = set()
     for r in report["rows"]:
-        try:
-            part = parts_service.inbound(db, operator_id=operator_id, **r["kwargs"])
+        fixed = (r["kwargs"].get("fixed_asset_no") or "").strip()
+        if fixed:
+            continue
+        model_id = r["kwargs"].get("model_id")
+        if not model_id:
+            continue
+        model = db.get(PartModel, model_id)
+        if model is None:
+            continue
+        candidate = parts_service.generate_next_fixed_asset_no(db, model.category)
+        while candidate in auto_gen_nos:
+            parts = candidate.rsplit("-", 1)
+            seq = int(parts[1]) + 1
+            candidate = f"{parts[0]}-{seq:03d}"
+        auto_gen_nos.add(candidate)
+        r["kwargs"]["fixed_asset_no"] = candidate
+
+    created_nos: list[str] = []
+    current_line: int | None = None
+    try:
+        for r in report["rows"]:
+            current_line = r["line"]
+            part = parts_service.inbound(
+                db, operator_id=operator_id, commit=False, **r["kwargs"]
+            )
             created_nos.append(part.fixed_asset_no)
-        except BusinessError as e:
-            # 预览后仍失败（并发等意外）：报告已入清单，便于对账
-            raise BusinessError(
-                f"第 {r['line']} 行入库失败：{e.message}。"
-                f"已成功 {len(created_nos)} 行：{'、'.join(created_nos) or '无'}"
-            ) from e
+        db.commit()
+    except BusinessError as e:
+        db.rollback()
+        where = f"第 {current_line} 行" if current_line is not None else "提交时"
+        raise BusinessError(f"{where}入库失败：{e.message}。整批未导入") from e
+    except Exception:
+        db.rollback()
+        raise
     return {**public, "created": len(created_nos), "committed": True}

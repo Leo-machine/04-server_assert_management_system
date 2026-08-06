@@ -44,7 +44,7 @@ def test_server_category_blocked_from_parts_inbound(client):
         json={"category": "服务器", "model_name": "浪潮 NF5280M6 整机", "spec": {"机型高度U": 2}},
         headers=op_headers(cast["admin"]["id"]),
     ).json()["id"]
-    loc_id = client.get("/api/storage-locations").json()[0]["id"]
+    loc_id = client.get("/api/storage-locations", headers=op_headers(1)).json()[0]["id"]
     r = client.post(
         "/api/parts/inbound",
         json={
@@ -57,7 +57,7 @@ def test_server_category_blocked_from_parts_inbound(client):
             "contract_no": "HT-1",
             "purchase_amount": 1000,
             "purchase_date": "2026-08-01",
-            "supplier": "通用",
+            "supplier": "通用配件供应商",
             "project": "测试",
             "owner_unit": "本单位信息中心",
             "warranty_expiry": "2029-01-01",
@@ -72,7 +72,7 @@ def test_server_category_blocked_from_parts_inbound(client):
 
 def test_brand_huawei_applies_to_server(client):
     """华为品牌适用类型应包含服务器（迁移回填）。"""
-    brands = client.get("/api/brands?category=服务器").json()
+    brands = client.get("/api/brands?category=服务器", headers=op_headers(1)).json()
     names = {b["name"] for b in brands}
     assert "华为" in names
     # 通用品牌（categories 为空）天然适用全部类型

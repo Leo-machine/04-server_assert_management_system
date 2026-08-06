@@ -29,9 +29,17 @@ class User(Base):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     role_label: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    # 轻量权限角色：操作员 / 审批人 / 管理员（发起审批时校验审批人角色）
-    role: Mapped[str] = mapped_column(String(20), nullable=False, default="操作员")
+    # 业务角色：设备供应商 / 外委运维 / 主业运维 / 领导
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="主业运维")
     password_hash: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # 账号状态：正常 / 待审核（自助注册）/ 驳回 / 停用
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="正常")
+    # 自助注册申请信息
+    applied_role: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    apply_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    reject_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    reviewed_by_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class PartModel(Base):
@@ -104,27 +112,33 @@ class Server(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     asset_no: Mapped[str] = mapped_column(String(100), nullable=False)
-    model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    serial_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    room: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    rack: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    u_position: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    responsible_group: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    serial_no: Mapped[str] = mapped_column(String(100), nullable=False)
+    # 部署位置（引用存放位置模块）
+    location_id: Mapped[int] = mapped_column(ForeignKey("storage_location.id"), nullable=False)
+    responsible_group: Mapped[str] = mapped_column(String(50), nullable=False)
     run_status: Mapped[str] = mapped_column(String(50), nullable=False)
-    # 合同/采购信息（服务器原装入库时带出给配件）
-    supplier: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    contract_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    project: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    owner_unit: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    # 维保到位时间
-    warranty_expiry: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    # 设备到货日期
-    arrival_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    purchase_amount: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(12, 2), nullable=True
-    )
+    # 合同/采购信息
+    supplier: Mapped[str] = mapped_column(String(100), nullable=False)
+    contract_no: Mapped[str] = mapped_column(String(100), nullable=False)
+    project: Mapped[str] = mapped_column(String(100), nullable=False)
+    owner_unit: Mapped[str] = mapped_column(String(100), nullable=False)
+    warranty_expiry: Mapped[date] = mapped_column(Date, nullable=False)
+    arrival_date: Mapped[date] = mapped_column(Date, nullable=False)
+    purchase_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    # 机箱插槽规格（建档时维护，供装机容量对照）
+    disk_slot_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    disk_interface: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    mem_slot_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    mem_ddr_gens: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    pcie_slot_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    nvme_slot_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    nvme_interface: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    location: Mapped["StorageLocation"] = relationship(foreign_keys=[location_id])
 
     links: Mapped[list["PartServerLink"]] = relationship(back_populates="server")
+    movements: Mapped[list["ServerMovementLog"]] = relationship(back_populates="server")
 
 
 class StorageLocation(Base):
@@ -304,6 +318,25 @@ class StocktakeItem(Base):
     discrepancy: Mapped[Optional["StocktakeDiscrepancy"]] = relationship(
         back_populates="item", uselist=False
     )
+
+
+class ServerMovementLog(Base):
+    """服务器履历：记录运行状态变更事件（仅 INSERT，不 UPDATE/DELETE）。"""
+
+    __tablename__ = "server_movement_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("server.id"), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    run_status_from: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    run_status_to: Mapped[str] = mapped_column(String(50), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    operator_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
+    work_order_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    server: Mapped["Server"] = relationship(back_populates="movements")
+    operator: Mapped["User"] = relationship(foreign_keys=[operator_id])
 
 
 class StocktakeDiscrepancy(Base):

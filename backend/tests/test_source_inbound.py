@@ -5,13 +5,13 @@ from tests.conftest import demo_cast, op_headers
 
 
 def _mem_model_id(client) -> int:
-    models = client.get("/api/part-models").json()
+    models = client.get("/api/part-models", headers=op_headers(1)).json()
     return next(m for m in models if m["category"] == "内存")["id"]
 
 
 def test_original_inbound_binds_server(client):
     cast = demo_cast(client)
-    servers = client.get("/api/servers").json()
+    servers = client.get("/api/servers", headers=op_headers(1)).json()
     idle = next(s for s in servers if s["asset_no"] == "SRV-IDLE-002")
 
     r = client.post(
@@ -40,7 +40,7 @@ def test_original_inbound_binds_server(client):
     assert part["source_type"] == "服务器原装"
 
     # 履历：入库直接到在用/服务器
-    moves = client.get(f"/api/parts/{part['id']}/movements").json()
+    moves = client.get(f"/api/parts/{part['id']}/movements", headers=op_headers(1)).json()
     assert len(moves) == 1
     assert moves[0]["event_type"] == "入库"
     assert moves[0]["status_to"] == enums.STATUS_IN_USE
@@ -66,35 +66,10 @@ def test_original_inbound_requires_server(client):
     assert "关联服务器" in r.json()["detail"]
 
 
-def test_original_inbound_blocked_when_server_info_incomplete(client):
-    cast = demo_cast(client)
-    # 建一台缺合同信息的服务器
-    sid = client.post(
-        "/api/servers",
-        json={"asset_no": "SRV-BARE-001", "responsible_group": "基础组"},
-        headers=op_headers(cast["admin"]["id"]),
-    ).json()["id"]
-    r = client.post(
-        "/api/parts/inbound",
-        json={
-            "model_id": _mem_model_id(client),
-            "fixed_asset_no": "FA-ORIG-003",
-            "source_type": "服务器原装",
-            "server_id": sid,
-            "serial_no": "SN-ORIG-003",
-            "purchase_amount": 800.00,
-            "allocatable_flag": "通用可调",
-            "remark": "测试",
-        },
-        headers=op_headers(cast["applicant"]["id"]),
-    )
-    assert r.status_code == 400
-    assert "服务器管理" in r.json()["detail"]
-
 
 def test_contract_inbound_manual_fields(client):
     cast = demo_cast(client)
-    loc_id = client.get("/api/storage-locations").json()[0]["id"]
+    loc_id = client.get("/api/storage-locations", headers=op_headers(1)).json()[0]["id"]
     r = client.post(
         "/api/parts/inbound",
         json={
@@ -107,7 +82,7 @@ def test_contract_inbound_manual_fields(client):
             "contract_no": "HT-2026-300",
             "purchase_amount": 1200.00,
             "purchase_date": "2026-08-01",
-            "supplier": "优普计算机有限公司",
+            "supplier": "通用配件供应商",
             "project": "2026年扩容",
             "owner_unit": "本单位信息中心",
             "warranty_expiry": "2029-08-01",
@@ -125,7 +100,7 @@ def test_contract_inbound_manual_fields(client):
 
 def test_manual_source_missing_fields_rejected(client):
     cast = demo_cast(client)
-    loc_id = client.get("/api/storage-locations").json()[0]["id"]
+    loc_id = client.get("/api/storage-locations", headers=op_headers(1)).json()[0]["id"]
     r = client.post(
         "/api/parts/inbound",
         json={

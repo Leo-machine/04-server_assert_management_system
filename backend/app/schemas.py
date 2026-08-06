@@ -11,6 +11,7 @@ class UserOut(BaseModel):
     name: str
     role_label: Optional[str] = None
     role: Optional[str] = None
+    status: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -107,50 +108,57 @@ class ExternalOrgOut(BaseModel):
 class ServerOut(BaseModel):
     id: int
     asset_no: str
-    model: Optional[str] = None
-    serial_no: Optional[str] = None
-    room: Optional[str] = None
-    rack: Optional[str] = None
-    u_position: Optional[str] = None
-    responsible_group: Optional[str] = None
+    model: str
+    serial_no: str
+    location_id: int
+    responsible_group: str
     run_status: str
-    supplier: Optional[str] = None
-    contract_no: Optional[str] = None
-    project: Optional[str] = None
-    owner_unit: Optional[str] = None
-    warranty_expiry: Optional[date] = None
-    arrival_date: Optional[date] = None
-    purchase_amount: Optional[Decimal] = None
+    supplier: str
+    contract_no: str
+    project: str
+    owner_unit: str
+    warranty_expiry: date
+    arrival_date: date
+    purchase_amount: Decimal
+    disk_slot_count: Optional[int] = None
+    disk_interface: Optional[str] = None
+    mem_slot_count: Optional[int] = None
+    mem_ddr_gens: Optional[str] = None
+    pcie_slot_count: Optional[int] = None
+    nvme_slot_count: Optional[int] = None
+    nvme_interface: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
 
 class ServerIn(BaseModel):
     asset_no: str
+    model: str
+    serial_no: str
+    location_id: int
+    responsible_group: str = "基础组"
     run_status: str = "未投运"
-    model: Optional[str] = None
-    serial_no: Optional[str] = None
-    room: Optional[str] = None
-    rack: Optional[str] = None
-    u_position: Optional[str] = None
-    responsible_group: Optional[str] = None
-    supplier: Optional[str] = None
-    contract_no: Optional[str] = None
-    project: Optional[str] = None
-    owner_unit: Optional[str] = None
-    warranty_expiry: Optional[date] = None
-    arrival_date: Optional[date] = None
-    purchase_amount: Optional[Decimal] = None
+    supplier: str
+    contract_no: str
+    project: str
+    owner_unit: str = "本单位信息中心"
+    warranty_expiry: date
+    arrival_date: date
+    purchase_amount: Decimal
+    disk_slot_count: Optional[int] = None
+    disk_interface: Optional[str] = None
+    mem_slot_count: Optional[int] = None
+    mem_ddr_gens: Optional[str] = None
+    pcie_slot_count: Optional[int] = None
+    nvme_slot_count: Optional[int] = None
+    nvme_interface: Optional[str] = None
 
 
 class ServerUpdateIn(BaseModel):
     asset_no: Optional[str] = None
-    run_status: Optional[str] = None
     model: Optional[str] = None
     serial_no: Optional[str] = None
-    room: Optional[str] = None
-    rack: Optional[str] = None
-    u_position: Optional[str] = None
+    location_id: Optional[int] = None
     responsible_group: Optional[str] = None
     supplier: Optional[str] = None
     contract_no: Optional[str] = None
@@ -159,12 +167,53 @@ class ServerUpdateIn(BaseModel):
     warranty_expiry: Optional[date] = None
     arrival_date: Optional[date] = None
     purchase_amount: Optional[Decimal] = None
+    disk_slot_count: Optional[int] = None
+    disk_interface: Optional[str] = None
+    mem_slot_count: Optional[int] = None
+    mem_ddr_gens: Optional[str] = None
+    pcie_slot_count: Optional[int] = None
+    nvme_slot_count: Optional[int] = None
+    nvme_interface: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
 
+class ServerInstalledPartOut(BaseModel):
+    id: int
+    fixed_asset_no: str
+    serial_no: Optional[str] = None
+    category: Optional[str] = None
+    model_name: Optional[str] = None
+    brand: Optional[str] = None
+    current_status: str
+    slot: Optional[str] = None
+    allocatable_flag: Optional[str] = None
+    source_type: Optional[str] = None
+
+
+class ServerDetailOut(ServerOut):
+    installed_parts: list[ServerInstalledPartOut] = []
+    installed_count: int = 0
+    installed_by_category: dict[str, int] = {}
+
+
 class ServerRunStatusIn(BaseModel):
     run_status: str
+    work_order_no: str  # 工作票工单号，必填
+
+
+class ServerMovementOut(BaseModel):
+    id: int
+    server_id: int
+    event_type: str
+    run_status_from: Optional[str] = None
+    run_status_to: str
+    occurred_at: datetime
+    operator_id: int
+    work_order_no: Optional[str] = None
+    remark: Optional[str] = None
+
+    model_config = {"from_attributes": True}
 
 
 class PartOut(BaseModel):
@@ -216,7 +265,7 @@ class MovementOut(BaseModel):
 
 class InboundIn(BaseModel):
     model_id: int
-    fixed_asset_no: str
+    fixed_asset_no: str = ""  # 空串 = 系统自动生成品类前缀-日期-序号
     source_type: str
     serial_no: str
     purchase_amount: Decimal

@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api, getStoredUser, getToken, setStoredUser, setToken } from '../api'
+import { homePathFor } from '../lib/roles'
 
 const DEMO_ACCOUNTS = [
-  { user: 'zhangyw', tip: '操作员 · 日常流转' },
-  { user: 'lizz', tip: '审批人 · 一级审批/盘点' },
-  { user: 'admin', tip: '管理员 · 基础数据' },
+  { user: 'qiancg', tip: '设备供应商 · 仅入库' },
+  { user: 'wawei', tip: '外委运维 · 与主业权限对等（不可审批）' },
+  { user: 'zhangyw', tip: '主业运维 · 流转/盘点（不可审批）' },
+  { user: 'admin', tip: '领导 · 全部权限含审批' },
 ]
 
 export default function Login() {
@@ -16,8 +18,9 @@ export default function Login() {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    if (getStoredUser() && getToken()) {
-      nav('/dashboard', { replace: true })
+    const u = getStoredUser()
+    if (u && getToken()) {
+      nav(homePathFor(u), { replace: true })
     }
   }, [nav])
 
@@ -28,13 +31,14 @@ export default function Login() {
     try {
       const data = await api.post('/auth/login', { username: username.trim(), password })
       setToken(data.token)
-      setStoredUser({
+      const user = {
         user_id: data.user_id,
         username: data.username,
         name: data.name,
         role: data.role,
-      })
-      nav('/dashboard', { replace: true })
+      }
+      setStoredUser(user)
+      nav(homePathFor(user), { replace: true })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -75,6 +79,9 @@ export default function Login() {
             {busy ? '登录中…' : '登 录'}
           </button>
         </form>
+        <p className="muted" style={{ textAlign: 'center' }}>
+          没有账号？<Link to="/register">注册新账号（需领导审批）</Link>
+        </p>
         <div className="login-hint muted">
           <p>演示账号（密码均为 123456）：</p>
           <ul>

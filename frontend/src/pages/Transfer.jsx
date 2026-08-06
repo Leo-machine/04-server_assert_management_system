@@ -35,7 +35,7 @@ export default function Transfer() {
     setError('')
     const ids = approvers.map(Number)
     if (ids.some((n) => !n) || new Set(ids).size !== 3) {
-      setError('请选择三位互不相同的审批人（须为审批人/管理员角色）')
+      setError('请选择三位互不相同的审批人（须为领导）')
       return
     }
     try {
@@ -64,7 +64,7 @@ export default function Transfer() {
         </p>
       )}
       <p className="muted">
-        调拨 = 所有权永久转移，通过后为终态不可恢复。申请人 = 当前操作人；三级审批人须互不相同。
+        调拨 = 所有权永久转移，通过后为终态不可恢复。申请人 = 当前操作人；三级审批人须为领导且互不相同。
       </p>
       {error && <div className="error">{error}</div>}
       <form onSubmit={onSubmit}>

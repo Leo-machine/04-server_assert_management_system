@@ -13,7 +13,6 @@ import hmac
 import os
 import secrets
 import time
-from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, Header, HTTPException
@@ -138,18 +137,13 @@ def get_current_user(
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=401, detail="用户不存在")
+    if getattr(user, "status", "正常") != "正常":
+        raise HTTPException(status_code=401, detail="账号状态异常，请重新登录")
     return user
 
 
 def get_operator_id(current_user: User = Depends(get_current_user)) -> int:
     return current_user.id
-
-
-def require_user(db: Session, user_id: int) -> User:
-    user = db.get(User, user_id)
-    if user is None:
-        raise HTTPException(status_code=400, detail=f"操作人不存在: {user_id}")
-    return user
 
 
 def require_role(user: User, allowed: tuple[str, ...]) -> None:

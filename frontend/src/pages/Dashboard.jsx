@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { api } from '../api'
+import { Navigate, useNavigate } from 'react-router-dom'
+import { api, getStoredUser } from '../api'
+import { homePathFor, isSupplier } from '../lib/roles'
 
 const HOME_OWNER_UNIT = '本单位信息中心'
 
 export default function Dashboard() {
   const nav = useNavigate()
+  const me = getStoredUser()
   const [stats, setStats] = useState(null)
   const [error, setError] = useState('')
+  const supplier = isSupplier(me)
 
   useEffect(() => {
+    if (supplier) return undefined
     Promise.all([
       api.get('/parts'),
       api.get('/approvals'),
@@ -54,7 +58,11 @@ export default function Dashboard() {
         })
       })
       .catch((e) => setError(e.message))
-  }, [])
+  }, [supplier])
+
+  if (supplier) {
+    return <Navigate to={homePathFor(me)} replace />
+  }
 
   return (
     <div>
@@ -126,9 +134,6 @@ export default function Dashboard() {
           <div className="alloc-bar-legend">
             <span><i className="dot-general" />通用可调 {stats.alloc.general}</span>
             <span><i className="dot-reserved" />保留/其他 {stats.alloc.reserved}</span>
-            <button type="button" className="linkish" onClick={() => nav('/allocatable')}>
-              按规格查看可调余量 →
-            </button>
           </div>
         </div>
       )}

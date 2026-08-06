@@ -17,7 +17,7 @@ def test_login_success_and_me(client):
     )
     assert r.status_code == 200, r.json()
     data = r.json()
-    assert data["role"] == "操作员"
+    assert data["role"] == "主业运维"
     assert data["token"].startswith(TOKEN_PREFIX)
 
     me = client.get(
@@ -33,7 +33,7 @@ def test_login_by_display_name(client):
     )
     assert r.status_code == 200, r.json()
     assert r.json()["username"] == "zhangyw"
-    assert r.json()["role"] == "操作员"
+    assert r.json()["role"] == "主业运维"
 
 
 def test_login_wrong_password(client):
@@ -50,10 +50,14 @@ def test_login_unknown_user(client):
     assert r.status_code == 401
 
 
+def test_parts_list_requires_auth(client):
+    assert client.get("/api/parts").status_code == 401
+
+
 def test_legacy_password_hash_upgrades_on_login(client):
     """种子是无盐 sha256，登录一次后应升级为 pbkdf2，且仍能再次登录。"""
     client.post("/api/auth/login", json={"username": "qiancg", "password": "123456"})
-    users = client.get("/api/users").json()
+    users = client.get("/api/users", headers=op_headers(1)).json()
     # 通过第二次登录验证升级后仍可认证
     r = client.post(
         "/api/auth/login", json={"username": "qiancg", "password": "123456"}
@@ -121,8 +125,10 @@ def test_role_gate_admin_only_catalog(client):
 
 def test_role_gate_stocktake_create(client):
     cast = demo_cast(client)
-    r = client.post("/api/stocktakes", json={}, headers=op_headers(cast["applicant"]["id"]))
+    # 设备供应商（钱仓管）不应有盘点权限
+    r = client.post("/api/stocktakes", json={}, headers=op_headers(cast["other"]["id"]))
     assert r.status_code == 403
+    # 领导有盘点权限
     r2 = client.post("/api/stocktakes", json={}, headers=op_headers(cast["a1"]["id"]))
     assert r2.status_code == 200, r2.json()
 

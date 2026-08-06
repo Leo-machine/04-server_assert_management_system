@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, downloadCsv, getStoredUser } from '../api'
+import { isLeader } from '../lib/roles'
+import { RESPONSIBLE_GROUPS } from '../lib/categories'
 import { formatSpec } from '../components/SpecFields'
 import ImportWizard from '../components/ImportWizard'
 
@@ -16,7 +18,7 @@ const CATEGORY_META = {
 }
 
 const SOURCES = ['服务器原装', '独立合同采购', '框招正偏移']
-const GROUPS = ['基础组', '运营组', '网络组', '平台组']
+const GROUPS = RESPONSIBLE_GROUPS
 
 const emptyCommon = {
   model_id: '',
@@ -46,6 +48,12 @@ function RoField({ label, value }) {
   )
 }
 
+function serverLocLabel(s, locs) {
+  if (!s?.location_id || !locs) return '-'
+  const l = locs.find((x) => x.id === s.location_id)
+  return l ? `${l.warehouse}/${l.slot}` : `ID#${s.location_id}`
+}
+
 export default function Inbound() {
   const nav = useNavigate()
   const [params, setParams] = useSearchParams()
@@ -60,7 +68,7 @@ export default function Inbound() {
   const [error, setError] = useState('')
   const [ok, setOk] = useState('')
   const [showImport, setShowImport] = useState(false)
-  const isAdmin = getStoredUser()?.role === '管理员'
+  const isAdmin = isLeader(getStoredUser())
 
   const schema = useMemo(
     () => schemas.find((s) => s.category === category),
@@ -106,6 +114,13 @@ export default function Inbound() {
       .catch((e) => setError(e.message))
   }, [category])
 
+  function fetchNextAssetNo(cat) {
+    if (!cat) return
+    api.get(`/parts/next-asset-no?category=${encodeURIComponent(cat)}`)
+      .then((data) => setForm((f) => ({ ...f, fixed_asset_no: data.fixed_asset_no })))
+      .catch(() => {}) // 静默失败，用户可手动输入
+  }
+
   useEffect(() => {
     if (!category) return
     const first = models.find((m) => m.category === category)
@@ -117,6 +132,7 @@ export default function Inbound() {
     }))
     setError('')
     setOk('')
+    fetchNextAssetNo(category)
   }, [category, models])
 
   function chooseCategory(cat) {
@@ -167,7 +183,7 @@ export default function Inbound() {
         <h2>分类入库</h2>
         <p className="muted">
           请选择配件类型进入对应入库表单。不同类型规格字段不同，保证入库数据可用、可检索。
-          型号不足时请先联系管理员在「型号管理」中维护
+          型号不足时请先联系领导在「型号管理」中维护
           {isAdmin && (
             <>（<Link to="/part-models">打开型号管理</Link>）</>
           )}
@@ -231,18 +247,6 @@ export default function Inbound() {
           </button>
           <button
             type="button"
-            className="inb-btn"
-            onClick={() =>
-              downloadCsv(
-                `/parts/export.csv?category=${encodeURIComponent(category)}`,
-                `${category}_台账导出.csv`,
-              ).catch((e) => setError(e.message))
-            }
-          >
-            📤 批量导出
-          </button>
-          <button
-            type="button"
             className={`inb-btn ${showImport ? 'is-on' : ''}`}
             onClick={() => setShowImport((v) => !v)}
           >
@@ -258,7 +262,6 @@ export default function Inbound() {
           </p>
           <ImportWizard
             templateUrl={`/parts/import-template.csv?category=${encodeURIComponent(category)}`}
-            exportUrl={`/parts/export.csv?category=${encodeURIComponent(category)}`}
             importUrl="/parts/batch-import"
             previewCols={[
               { key: 'fixed_asset_no', label: '固定资产编号' },
@@ -280,7 +283,7 @@ export default function Inbound() {
 
       {!categoryModels.length ? (
         <div className="error">
-          当前类型暂无型号，请先联系管理员在型号管理中新增
+          当前类型暂无型号，请先联系领导在型号管理中新增
           {isAdmin && (
             <>
               （
@@ -311,7 +314,7 @@ export default function Inbound() {
                   <option value="">— 请选择服务器资产编号 —</option>
                   {servers.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.asset_no}（{s.room || '-'} / {s.run_status}）
+                      {s.asset_no}（{s.run_status}）
                     </option>
                   ))}
                 </select>
@@ -333,7 +336,7 @@ export default function Inbound() {
           {isOriginal && selectedServer && (
             <fieldset className="fields-2col">
               <legend>由服务器档案带出（只读）</legend>
-              <RoField label="存放位置" value={[selectedServer.room, selectedServer.rack, selectedServer.u_position].filter(Boolean).join(' / ')} />
+              <RoField label="部署位置" value={serverLocLabel(selectedServer, locs)} />
               <RoField label="运维部门" value={selectedServer.responsible_group} />
               <RoField label="供应商" value={selectedServer.supplier} />
               <RoField label="所属项目" value={selectedServer.project} />
@@ -432,7 +435,16 @@ export default function Inbound() {
             <legend>实物信息</legend>
             <label>
               固定资产编号 *
-              <input value={form.fixed_asset_no} onChange={set('fixed_asset_no')} required placeholder="FA-XXX-0000" />
+              <div style={{ display: 'flex', gap: 4 }}>
+                <input value={form.fixed_asset_no} onChange={set('fixed_asset_no')} required
+                  placeholder="自动生成，可手动修改" style={{ flex: 1 }} />
+                <button type="button" className="secondary"
+                  style={{ padding: '0 0.6rem', fontSize: '0.85rem', whiteSpace: 'nowrap' }}
+                  title="重新生成编号"
+                  onClick={() => fetchNextAssetNo(category)}>
+                  ↻ 生成
+                </button>
+              </div>
             </label>
             <label>
               设备序列（SN）号 *

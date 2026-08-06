@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -11,10 +11,13 @@ from ..models import (
     PartModel,
     PartServerLink,
     Server,
+    ServerMovementLog,
     StorageLocation,
+    Supplier,
 )
 from sqlalchemy.exc import IntegrityError
 
+from . import approvals as approvals_service
 from .movement import (
     BusinessError,
     apply_projection_from_movement,
@@ -22,6 +25,36 @@ from .movement import (
     insert_movement,
     require_status,
 )
+from ..category_specs import CATEGORY_ASSET_PREFIX, validate_category
+
+
+def generate_next_fixed_asset_no(db: Session, category: str) -> str:
+    """生成下一条固定资产编号：PREFIX-YYYYMMDD-NNN（当天该品类最大序号+1）。
+
+    仅用于前端预填建议值；实际入库时以 DB UNIQUE 约束为最终保障。
+    """
+    prefix = CATEGORY_ASSET_PREFIX.get(category)
+    if prefix is None:
+        validate_category(category)
+        raise BusinessError(f"未定义固定资产编号前缀: {category}")
+
+    today_str = date.today().strftime("%Y%m%d")
+    pattern = f"{prefix}-{today_str}-%"
+
+    existing = db.scalars(
+        select(Part.fixed_asset_no).where(Part.fixed_asset_no.like(pattern))
+    ).all()
+
+    max_seq = 0
+    for no in existing:
+        try:
+            seq = int(no.rsplit("-", 1)[-1])
+            if seq > max_seq:
+                max_seq = seq
+        except (ValueError, IndexError):
+            continue
+
+    return f"{prefix}-{today_str}-{max_seq + 1:03d}"
 
 
 def inbound(
@@ -29,7 +62,7 @@ def inbound(
     *,
     operator_id: int,
     model_id: int,
-    fixed_asset_no: str,
+    fixed_asset_no: str = "",
     source_type: str,
     allocatable_flag: str,
     remark: str,
@@ -45,10 +78,9 @@ def inbound(
     owner_unit: Optional[str] = None,
     warranty_expiry: Optional[date] = None,
     sensitivity: Optional[str] = None,
+    commit: bool = True,
 ) -> Part:
     # ---- 通用校验 ----
-    if not fixed_asset_no.strip():
-        raise BusinessError("固定资产编号必填")
     if not serial_no.strip():
         raise BusinessError("设备序列（SN）号必填")
     if source_type not in enums.SOURCE_TYPES:
@@ -66,6 +98,7 @@ def inbound(
         raise BusinessError("型号不存在")
     if model.category == "服务器":
         raise BusinessError("服务器整机请走「服务器管理」建档，不走配件入库")
+
     # 入库前确认型号规格仍符合类型定义（保证数据可用）
     from ..category_specs import SpecValidationError, validate_and_normalize_spec
 
@@ -74,11 +107,18 @@ def inbound(
     except SpecValidationError as e:
         raise BusinessError(f"所选型号规格不完整，请先在型号管理中补全：{e.message}") from e
 
-    exists = db.scalars(
-        select(Part).where(Part.fixed_asset_no == fixed_asset_no)
-    ).first()
-    if exists:
-        raise BusinessError(f"固定资产编号已存在: {fixed_asset_no}")
+    # 固定资产编号：空则按品类自动生成，填了则使用用户输入值
+    auto_generated = not fixed_asset_no.strip()
+    original_input = fixed_asset_no
+
+    if auto_generated:
+        fixed_asset_no = generate_next_fixed_asset_no(db, model.category)
+    else:
+        exists = db.scalars(
+            select(Part).where(Part.fixed_asset_no == fixed_asset_no)
+        ).first()
+        if exists:
+            raise BusinessError(f"固定资产编号已存在: {fixed_asset_no}")
 
     # ---- 按来源分流 ----
     if source_type == enums.SOURCE_ORIGINAL:
@@ -140,6 +180,13 @@ def inbound(
         if responsible_group not in enums.RESPONSIBLE_GROUPS:
             raise BusinessError(f"非法 responsible_group: {responsible_group}")
         supplier_v = supplier.strip()
+        # 非原装：供应商须在名录中（与批量导入一致）
+        if supplier_v:
+            known = db.scalars(
+                select(Supplier).where(Supplier.name == supplier_v)
+            ).first()
+            if known is None:
+                raise BusinessError(f"供应商「{supplier_v}」不在名录中，请先维护")
         contract_v = contract_no.strip()
         project_v = project.strip()
         owner_v = owner_unit.strip()
@@ -188,13 +235,33 @@ def inbound(
     apply_projection_from_movement(part, movement)
     if source_type == enums.SOURCE_ORIGINAL:
         db.add(PartServerLink(part_id=part.id, server_id=server_id, slot=None))
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise handle_integrity_error(e, "固定资产编号可能已存在") from e
-    db.refresh(part)
-    return part
+
+    MAX_RETRIES = 5 if auto_generated else 1
+    last_error = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            if commit:
+                db.commit()
+                db.refresh(part)
+            else:
+                db.flush()
+            return part
+        except IntegrityError as e:
+            db.rollback()
+            if not auto_generated or attempt >= MAX_RETRIES - 1:
+                raise handle_integrity_error(e, "固定资产编号可能已存在") from e
+            # 自动生成冲突：递增序号重试
+            last_error = e
+            import time
+            time.sleep(0.05 * (attempt + 1))
+            fixed_asset_no = generate_next_fixed_asset_no(db, model.category)
+            part.fixed_asset_no = fixed_asset_no
+            # re-associate with the current session after rollback
+            db.add(part)
+            if source_type == enums.SOURCE_ORIGINAL:
+                db.add(PartServerLink(part_id=part.id, server_id=server_id, slot=None))
+
+    raise BusinessError("固定资产编号自动生成失败，已达最大重试次数，请稍后重试")
 
 
 def install(
@@ -209,6 +276,7 @@ def install(
     part = db.get(Part, part_id)
     if part is None:
         raise BusinessError("配件不存在")
+    approvals_service.assert_no_inflight_approval(db, part_id)
     require_status(part, {enums.STATUS_IN_STOCK}, "装机")
 
     server = db.get(Server, server_id)
@@ -258,6 +326,7 @@ def uninstall(
     part = db.get(Part, part_id)
     if part is None:
         raise BusinessError("配件不存在")
+    approvals_service.assert_no_inflight_approval(db, part_id)
     require_status(part, {enums.STATUS_IN_USE}, "拆下")
 
     link = part.server_link
@@ -308,6 +377,7 @@ def report_damage(
     part = db.get(Part, part_id)
     if part is None:
         raise BusinessError("配件不存在")
+    approvals_service.assert_no_inflight_approval(db, part_id)
     require_status(part, {enums.STATUS_IN_STOCK}, "报损")
     if not (remark or "").strip():
         raise BusinessError("报损必须填写 remark 说明损坏情况")
@@ -342,6 +412,7 @@ def return_from_loan(
     part = db.get(Part, part_id)
     if part is None:
         raise BusinessError("配件不存在")
+    approvals_service.assert_no_inflight_approval(db, part_id)
     require_status(part, {enums.STATUS_LOANED}, "归还")
 
     loc = db.get(StorageLocation, storage_location_id)
@@ -370,15 +441,33 @@ def return_from_loan(
     return part
 
 
-def set_server_run_status(db: Session, server_id: int, run_status: str) -> Server:
+def set_server_run_status(
+    db: Session, server_id: int, run_status: str,
+    *, work_order_no: str = "", operator_id: int = 0,
+) -> Server:
     if run_status not in (enums.RUN_NOT_LIVE, enums.RUN_LIVE):
-        raise BusinessError("demo 仅允许在「未投运」与「投运」之间切换，不可设为退役")
+        raise BusinessError("仅允许在「未投运」与「投运」之间切换，不可设为退役")
+    if not (work_order_no or "").strip():
+        raise BusinessError("必须提供工作票工单号")
     server = db.get(Server, server_id)
     if server is None:
         raise BusinessError("服务器不存在")
     if server.run_status == enums.RUN_RETIRED:
         raise BusinessError("退役服务器不可切换运行状态")
+
+    status_from = server.run_status
     server.run_status = run_status
+
+    movement = ServerMovementLog(
+        server_id=server.id,
+        event_type="切换运行状态",
+        run_status_from=status_from,
+        run_status_to=run_status,
+        occurred_at=datetime.now(timezone.utc),
+        operator_id=operator_id,
+        work_order_no=work_order_no.strip(),
+    )
+    db.add(movement)
     db.commit()
     db.refresh(server)
     return server

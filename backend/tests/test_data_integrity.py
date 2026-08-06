@@ -85,7 +85,7 @@ def test_memory_ddr5_passes_and_lands_in_ddr_gen(client):
 # ---------------------------------------------------------------------------
 def test_all_models_spec_aggregate_consistency(client):
     """全量 part_model：内存的 spec↔聚合列一致；非内存聚合列为 NULL。"""
-    models = client.get("/api/part-models").json()
+    models = client.get("/api/part-models", headers=op_headers(1)).json()
     assert len(models) > 0, "应至少有一条型号数据"
 
     for m in models:
@@ -133,7 +133,7 @@ def test_sync_updates_aggregate_on_spec_change(db_session, client):
         json={"spec": {"容量GB": 32, "内存类型": "DDR5", "频率MHz": 4800}},
         headers=op_headers(1),
     )
-    updated = client.get(f"/api/part-models/{mid}").json()
+    updated = client.get(f"/api/part-models/{mid}", headers=op_headers(1)).json()
     assert updated["capacity_gb"] == 32
     assert updated["ddr_gen"] == "DDR5"
 

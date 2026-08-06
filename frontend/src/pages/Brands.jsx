@@ -1,20 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
+import { ALL_MANAGED_CATEGORIES } from '../lib/categories'
 import ListToolbar from '../components/ListToolbar'
 import { useSelection } from '../hooks/useSelection'
 import { filterByQuery } from '../lib/fuzzy'
 
-const ALL_CATEGORIES = [
-  '内存',
-  '机械硬盘',
-  '固态硬盘',
-  'RAID卡',
-  '光模块',
-  '网卡',
-  'HBA卡',
-  '算力卡',
-  '服务器',
-]
+const ALL_CATEGORIES = ALL_MANAGED_CATEGORIES
 
 const emptyForm = { name: '', categories: [] }
 

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api } from '../api'
+import { api, getStoredUser } from '../api'
 import { formatSpec } from '../components/SpecFields'
+import { OPS_ROLES, hasRole } from '../lib/roles'
+import { locLabel } from '../lib/locLabel'
 
 function Field({ label, children }) {
   return (
@@ -12,22 +14,6 @@ function Field({ label, children }) {
   )
 }
 
-function locLabel(part, servers, locs, orgs) {
-  if (!part?.current_loc_kind) return '—'
-  if (part.current_loc_kind === '库位') {
-    const loc = locs.find((l) => l.id === part.current_loc_id)
-    return loc ? `${loc.warehouse}/${loc.slot}` : `库位#${part.current_loc_id}`
-  }
-  if (part.current_loc_kind === '服务器') {
-    const s = servers.find((x) => x.id === part.current_loc_id)
-    return s ? `${s.asset_no}（${s.run_status}）` : `服务器#${part.current_loc_id}`
-  }
-  if (part.current_loc_kind === '外单位') {
-    const o = orgs.find((x) => x.id === part.current_loc_id)
-    return o ? o.org_name : `外单位#${part.current_loc_id}`
-  }
-  return part.current_loc_kind
-}
 
 export default function PartDetail() {
   const { id } = useParams()
@@ -57,26 +43,32 @@ export default function PartDetail() {
       .catch((e) => setError(e.message))
   }, [id])
 
+  const me = getStoredUser()
+  const canInstall = hasRole(me, OPS_ROLES)
+  const canLoan = hasRole(me, OPS_ROLES)
+
   const actions = useMemo(() => {
     if (!part) return []
     const links = [{ to: `/parts/${id}/history`, label: '查看履历' }]
     if (part.current_status === '在库') {
-      links.push(
-        { to: `/parts/${id}/install`, label: '装机' },
-        { to: `/parts/${id}/loan`, label: '借出' },
-        { to: `/parts/${id}/transfer`, label: '调拨' },
-        { to: `/parts/${id}/scrap`, label: '报废' },
-        { to: `/parts/${id}/damage`, label: '报损' },
-      )
-    } else if (part.current_status === '在用') {
+      if (canInstall) links.push({ to: `/parts/${id}/install`, label: '装机' })
+      if (canLoan) {
+        links.push(
+          { to: `/parts/${id}/loan`, label: '借出' },
+          { to: `/parts/${id}/transfer`, label: '调拨' },
+          { to: `/parts/${id}/scrap`, label: '报废' },
+          { to: `/parts/${id}/damage`, label: '报损' },
+        )
+      }
+    } else if (part.current_status === '在用' && canInstall) {
       links.push({ to: `/parts/${id}/uninstall`, label: '拆下' })
-    } else if (part.current_status === '损坏') {
+    } else if (part.current_status === '损坏' && canLoan) {
       links.push({ to: `/parts/${id}/scrap`, label: '报废' })
-    } else if (part.current_status === '借出') {
+    } else if (part.current_status === '借出' && canLoan) {
       links.push({ to: `/parts/${id}/return`, label: '归还' })
     }
     return links
-  }, [part, id])
+  }, [part, id, canInstall, canLoan])
 
   const recentMoves = moves.slice(-8).reverse()
 

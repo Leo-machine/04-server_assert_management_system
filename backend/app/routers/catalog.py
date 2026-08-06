@@ -6,10 +6,12 @@ from sqlalchemy.orm import Session
 from .. import enums
 from ..database import get_db
 from ..deps import get_current_user, require_role
-from ..models import ExternalOrg, Server, User
+from ..models import ExternalOrg, Server, ServerMovementLog, User
 from ..schemas import (
     ExternalOrgOut,
+    ServerDetailOut,
     ServerIn,
+    ServerMovementOut,
     ServerOut,
     ServerRunStatusIn,
     ServerUpdateIn,
@@ -35,12 +37,25 @@ def _csv_response(text: str, filename: str) -> Response:
 
 
 @router.get("/users", response_model=list[UserOut])
-def list_users(db: Session = Depends(get_db)):
-    return list(db.scalars(select(User).order_by(User.id)).all())
+def list_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # 审批人选人等场景：仅返回正常账号（无密码字段）
+    return list(
+        db.scalars(
+            select(User)
+            .where(User.status == enums.USER_STATUS_ACTIVE)
+            .order_by(User.id)
+        ).all()
+    )
 
 
 @router.get("/servers", response_model=list[ServerOut])
-def list_servers(db: Session = Depends(get_db)):
+def list_servers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     return list(db.scalars(select(Server).order_by(Server.id)).all())
 
 
@@ -49,6 +64,7 @@ def export_servers(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    require_role(current_user, enums.INVENTORY_ROLES)
     return _csv_response(servers_service.export_servers_csv(db), "servers_export.csv")
 
 
@@ -67,19 +83,32 @@ def batch_import_servers(
     current_user: User = Depends(get_current_user),
 ):
     """两段式批量导入：dry_run=true 校验预览；dry_run=false 整批通过才写入。"""
-    require_role(current_user, (enums.ROLE_ADMIN,))
+    require_role(current_user, (enums.ROLE_LEADER,))
     try:
         return servers_service.batch_import_servers(db, body.content, dry_run=dry_run)
     except BusinessError as e:
         raise HTTPException(status_code=400, detail=e.message) from e
 
 
-@router.get("/servers/{server_id}", response_model=ServerOut)
-def get_server(server_id: int, db: Session = Depends(get_db)):
-    server = db.get(Server, server_id)
-    if server is None:
-        raise HTTPException(status_code=404, detail="服务器不存在")
-    return server
+@router.get("/servers/{server_id}", response_model=ServerDetailOut)
+def get_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """服务器详情：档案字段 + 当前安装配件清单。"""
+    try:
+        detail = servers_service.get_server_detail(db, server_id)
+    except BusinessError as e:
+        raise HTTPException(status_code=404, detail=e.message) from e
+    server = detail["server"]
+    base = ServerOut.model_validate(server).model_dump()
+    return ServerDetailOut(
+        **base,
+        installed_parts=detail["installed_parts"],
+        installed_count=detail["installed_count"],
+        installed_by_category=detail["installed_by_category"],
+    )
 
 
 @router.post("/servers", response_model=ServerOut)
@@ -88,7 +117,7 @@ def create_server(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_role(current_user, (enums.ROLE_ADMIN,))
+    require_role(current_user, (enums.ROLE_LEADER,))
     try:
         return servers_service.create_server(db, **body.model_dump())
     except BusinessError as e:
@@ -102,7 +131,7 @@ def update_server(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_role(current_user, (enums.ROLE_ADMIN,))
+    require_role(current_user, (enums.ROLE_LEADER,))
     try:
         return servers_service.update_server(
             db, server_id, **body.model_dump(exclude_unset=True)
@@ -117,7 +146,7 @@ def delete_server(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_role(current_user, (enums.ROLE_ADMIN,))
+    require_role(current_user, (enums.ROLE_LEADER,))
     try:
         servers_service.delete_server(db, server_id)
     except BusinessError as e:
@@ -132,12 +161,32 @@ def patch_run_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    require_role(current_user, enums.INSTALL_UNINSTALL_ROLES)
     try:
-        return parts_service.set_server_run_status(db, server_id, body.run_status)
+        return parts_service.set_server_run_status(
+            db, server_id, body.run_status,
+            work_order_no=body.work_order_no, operator_id=current_user.id,
+        )
     except BusinessError as e:
         raise HTTPException(status_code=400, detail=e.message) from e
 
 
+@router.get("/servers/{server_id}/movements", response_model=list[ServerMovementOut])
+def server_movements(
+    server_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return list(db.scalars(
+        select(ServerMovementLog)
+        .where(ServerMovementLog.server_id == server_id)
+        .order_by(ServerMovementLog.occurred_at.desc(), ServerMovementLog.id.desc())
+    ).all())
+
+
 @router.get("/external-orgs", response_model=list[ExternalOrgOut])
-def list_orgs(db: Session = Depends(get_db)):
+def list_orgs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     return list(db.scalars(select(ExternalOrg).order_by(ExternalOrg.id)).all())

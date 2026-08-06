@@ -71,13 +71,29 @@ HOME_OWNER_UNIT = "本单位信息中心"
 # 内存代际
 DDR_GENS = ("DDR4", "DDR5")
 
-# 用户角色（轻量权限：服务端硬校验，选人切换仍保留）
-ROLE_OPERATOR = "操作员"
-ROLE_APPROVER = "审批人"
-ROLE_ADMIN = "管理员"
-ROLES = (ROLE_OPERATOR, ROLE_APPROVER, ROLE_ADMIN)
-# 可担任审批人 / 盘点管理的角色
-APPROVER_ROLES = (ROLE_APPROVER, ROLE_ADMIN)
+# 四类业务角色（矩阵落地）
+# - 领导：全部权限（含审批与基础数据）
+# - 主业运维 / 外委运维：权限对等（流转/盘点/装机等），不可审批
+# - 设备供应商：仅入库相关，不可看配件列表与可调余量
+ROLE_SUPPLIER = "设备供应商"
+ROLE_MAINTENANCE = "外委运维"
+ROLE_OPERATIONS = "主业运维"
+ROLE_LEADER = "领导"
+ROLES = (ROLE_SUPPLIER, ROLE_MAINTENANCE, ROLE_OPERATIONS, ROLE_LEADER)
+
+# 业务运维（外委 = 主业；领导具备同等业务权限）
+OPS_ROLES = (ROLE_MAINTENANCE, ROLE_OPERATIONS, ROLE_LEADER)
+# 仅领导可审批
+APPROVER_ROLES = (ROLE_LEADER,)
+# 配件列表 / 可调余量 / 导出（供应商不可）
+VIEW_PARTS_ROLES = OPS_ROLES
+INVENTORY_ROLES = OPS_ROLES
+# 盘点发起/结案（与审批分离）
+STOCKTAKE_ROLES = OPS_ROLES
+# 入库：供应商 + 业务运维
+INBOUND_ROLES = (ROLE_SUPPLIER, ROLE_MAINTENANCE, ROLE_OPERATIONS, ROLE_LEADER)
+INSTALL_UNINSTALL_ROLES = OPS_ROLES
+LOAN_RETURN_ROLES = OPS_ROLES
 
 # 盘点
 SCOPE_FULL = "全盘"
@@ -100,3 +116,11 @@ DISC_MISPLACE = "错位"
 DISC_STATUS_HOLD = "挂起追查"
 DISC_STATUS_REVIEW = "待复核"
 DISC_STATUS_RESOLVED = "已处置"
+
+# ---- 账号状态与自助注册 ----
+USER_STATUS_ACTIVE = "正常"
+USER_STATUS_PENDING = "待审核"
+USER_STATUS_REJECTED = "驳回"
+USER_STATUS_DISABLED = "停用"
+# 自助注册可申请的角色（领导只能由现有领导授权，不开放自助申请）
+SELF_REGISTER_ROLES = (ROLE_SUPPLIER, ROLE_MAINTENANCE, ROLE_OPERATIONS)

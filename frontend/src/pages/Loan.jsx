@@ -35,7 +35,7 @@ export default function Loan() {
     setError('')
     const ids = approvers.map(Number)
     if (ids.some((n) => !n) || new Set(ids).size !== 3) {
-      setError('请选择三位互不相同的审批人（须为审批人/管理员角色）')
+      setError('请选择三位互不相同的审批人（须为领导）')
       return
     }
     try {
@@ -62,7 +62,7 @@ export default function Loan() {
           {part.fixed_asset_no} · 当前状态 {part.current_status}
         </p>
       )}
-      <p className="muted">申请人 = 当前登录用户；不得出现在审批人中；三级审批人须互不相同。</p>
+      <p className="muted">申请人 = 当前登录用户；不得出现在审批人中；三级审批人须为领导且互不相同。</p>
       {error && <div className="error">{error}</div>}
       <form onSubmit={onSubmit}>
         <label>

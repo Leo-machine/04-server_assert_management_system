@@ -53,7 +53,7 @@ def create_stocktake(
     current_user: User = Depends(get_current_user),
 ):
     operator_id = current_user.id
-    require_role(current_user, enums.APPROVER_ROLES)
+    require_role(current_user, enums.STOCKTAKE_ROLES)
     try:
         st = stocktake_service.create_stocktake(
             db,
@@ -67,12 +67,19 @@ def create_stocktake(
 
 
 @router.get("", response_model=list[StocktakeListOut])
-def list_stocktakes(db: Session = Depends(get_db)):
+def list_stocktakes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     return stocktake_service.list_stocktakes(db)
 
 
 @router.get("/{stocktake_id}", response_model=StocktakeOut)
-def get_stocktake(stocktake_id: int, db: Session = Depends(get_db)):
+def get_stocktake(
+    stocktake_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     try:
         st = stocktake_service.get_stocktake(db, stocktake_id)
     except BusinessError as e:
@@ -81,7 +88,11 @@ def get_stocktake(stocktake_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{stocktake_id}/items", response_model=list[StocktakeItemOut])
-def list_items(stocktake_id: int, db: Session = Depends(get_db)):
+def list_items(
+    stocktake_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     try:
         st = stocktake_service.get_stocktake(db, stocktake_id)
     except BusinessError as e:
@@ -96,6 +107,7 @@ def check(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    require_role(current_user, enums.STOCKTAKE_ROLES)
     operator_id = current_user.id
     try:
         item = stocktake_service.check_item(
@@ -116,6 +128,7 @@ def confirm_external(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    require_role(current_user, enums.STOCKTAKE_ROLES)
     operator_id = current_user.id
     try:
         item = stocktake_service.confirm_external(
@@ -130,7 +143,11 @@ def confirm_external(
 
 
 @router.get("/{stocktake_id}/discrepancies", response_model=list[StocktakeDiscrepancyOut])
-def discrepancies(stocktake_id: int, db: Session = Depends(get_db)):
+def discrepancies(
+    stocktake_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     try:
         rows = stocktake_service.list_discrepancies(db, stocktake_id)
     except BusinessError as e:
@@ -145,7 +162,7 @@ def complete(
     current_user: User = Depends(get_current_user),
 ):
     operator_id = current_user.id
-    require_role(current_user, enums.APPROVER_ROLES)
+    require_role(current_user, enums.STOCKTAKE_ROLES)
     try:
         st = stocktake_service.complete_stocktake(
             db, stocktake_id=stocktake_id, operator_id=operator_id

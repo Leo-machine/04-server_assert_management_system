@@ -20,14 +20,14 @@ DEFAULT_DEMO_PASSWORD_HASH = hashlib.sha256(DEFAULT_DEMO_PASSWORD.encode()).hexd
 
 # role_label / 旧 role 文本 → 权限角色
 _LABEL_TO_ROLE = {
-    "运维": enums.ROLE_OPERATOR,
-    "仓管": enums.ROLE_OPERATOR,
-    "组长": enums.ROLE_APPROVER,
-    "主管": enums.ROLE_APPROVER,
-    "经理": enums.ROLE_APPROVER,
-    "管理员": enums.ROLE_ADMIN,
-    "审批人": enums.ROLE_APPROVER,
-    "操作员": enums.ROLE_OPERATOR,
+    "运维": enums.ROLE_OPERATIONS,
+    "仓管": enums.ROLE_OPERATIONS,
+    "组长": enums.ROLE_LEADER,
+    "主管": enums.ROLE_LEADER,
+    "经理": enums.ROLE_LEADER,
+    "管理员": enums.ROLE_LEADER,
+    "审批人": enums.ROLE_LEADER,
+    "操作员": enums.ROLE_OPERATIONS,
 }
 
 # 已知种子用户的登录账号（老库 username 为空时按 name 回填）
@@ -57,7 +57,7 @@ def _add_column_if_missing(db: Session, table: str, col: str, ddl_type: str) -> 
 def _resolve_role(u: User) -> str:
     name = (u.name or "").strip().lower()
     if name == "admin":
-        return enums.ROLE_ADMIN
+        return enums.ROLE_LEADER
     label = (u.role_label or "").strip()
     if label in _LABEL_TO_ROLE:
         return _LABEL_TO_ROLE[label]
@@ -66,7 +66,7 @@ def _resolve_role(u: User) -> str:
         return current
     if current in _LABEL_TO_ROLE:
         return _LABEL_TO_ROLE[current]
-    return enums.ROLE_OPERATOR
+    return enums.ROLE_OPERATIONS
 
 
 def _backfill_user_roles(db: Session) -> int:

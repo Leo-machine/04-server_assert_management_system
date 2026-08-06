@@ -11,12 +11,12 @@ def _csv(*rows):
 
 
 def _mem_model_name(client) -> str:
-    models = client.get("/api/part-models").json()
+    models = client.get("/api/part-models", headers=op_headers(1)).json()
     return next(m for m in models if m["category"] == "内存")["model_name"]
 
 
 def _loc_label(client) -> str:
-    locs = client.get("/api/storage-locations").json()
+    locs = client.get("/api/storage-locations", headers=op_headers(1)).json()
     loc = next(l for l in locs if not l.get("allowed_categories") or "内存" in l["allowed_categories"])
     return f"{loc['warehouse']}/{loc['slot']}"
 
@@ -48,7 +48,7 @@ def test_batch_import_original_and_contract(client):
     assert prev.status_code == 200, prev.json()
     body = prev.json()
     assert body["total"] == 2 and body["valid"] == 2 and not body["committed"]
-    nos_preview = {p["fixed_asset_no"] for p in client.get("/api/parts").json()}
+    nos_preview = {p["fixed_asset_no"] for p in client.get("/api/parts", headers=op_headers(1)).json()}
     assert "FA-BI-001" not in nos_preview  # 预览不写库
 
     done = client.post(
@@ -59,7 +59,7 @@ def test_batch_import_original_and_contract(client):
     assert done.status_code == 200
     assert done.json()["created"] == 2
 
-    parts = {p["fixed_asset_no"]: p for p in client.get("/api/parts").json()}
+    parts = {p["fixed_asset_no"]: p for p in client.get("/api/parts", headers=op_headers(1)).json()}
     p1 = parts["FA-BI-001"]
     assert p1["current_status"] == enums.STATUS_IN_USE
     assert p1["current_loc_kind"] == enums.LOC_SERVER
@@ -69,7 +69,7 @@ def test_batch_import_original_and_contract(client):
     assert p2["allocatable_flag"] == "保留"
 
     # 原装件履历：入库直接在装
-    moves = client.get(f"/api/parts/{p1['id']}/movements").json()
+    moves = client.get(f"/api/parts/{p1['id']}/movements", headers=op_headers(1)).json()
     assert moves[0]["event_type"] == "入库" and moves[0]["loc_to_kind"] == "服务器"
 
 
@@ -102,7 +102,7 @@ def test_batch_import_validation_errors(client):
         headers=h,
     )
     assert r2.status_code == 400
-    nos = {p["fixed_asset_no"] for p in client.get("/api/parts").json()}
+    nos = {p["fixed_asset_no"] for p in client.get("/api/parts", headers=op_headers(1)).json()}
     assert "FA-BI-010" not in nos and "FA-BI-012" not in nos
 
 
@@ -132,7 +132,7 @@ def test_batch_import_rejects_invalid_source(client):
         headers=h,
     )
     assert r2.status_code == 400
-    nos = {p["fixed_asset_no"] for p in client.get("/api/parts").json()}
+    nos = {p["fixed_asset_no"] for p in client.get("/api/parts", headers=op_headers(1)).json()}
     assert "FA-BI-GIFT" not in nos
 
 

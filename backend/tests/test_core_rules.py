@@ -10,7 +10,7 @@ from tests.conftest import demo_cast, op_headers
 
 
 def _stock_part_id(client) -> int:
-    parts = client.get("/api/parts").json()
+    parts = client.get("/api/parts", headers=op_headers(1)).json()
     for p in parts:
         if p["current_status"] == enums.STATUS_IN_STOCK:
             return p["id"]
@@ -18,8 +18,8 @@ def _stock_part_id(client) -> int:
 
 
 def _live_server_part(client) -> tuple:
-    servers = {s["id"]: s for s in client.get("/api/servers").json()}
-    parts = client.get("/api/parts").json()
+    servers = {s["id"]: s for s in client.get("/api/servers", headers=op_headers(1)).json()}
+    parts = client.get("/api/parts", headers=op_headers(1)).json()
     for p in parts:
         if (
             p["current_status"] == enums.STATUS_IN_USE
@@ -31,22 +31,22 @@ def _live_server_part(client) -> tuple:
 
 
 def _idle_server(client) -> int:
-    for s in client.get("/api/servers").json():
+    for s in client.get("/api/servers", headers=op_headers(1)).json():
         if s["run_status"] == enums.RUN_NOT_LIVE:
             return s["id"]
     raise AssertionError("种子中应有未投运服务器")
 
 
 def _users(client):
-    return client.get("/api/users").json()
+    return client.get("/api/users", headers=op_headers(1)).json()
 
 
 def _locs(client):
-    return client.get("/api/storage-locations").json()
+    return client.get("/api/storage-locations", headers=op_headers(1)).json()
 
 
 def _org(client):
-    return client.get("/api/external-orgs").json()[0]
+    return client.get("/api/external-orgs", headers=op_headers(1)).json()[0]
 
 
 def test_live_server_blocks_uninstall(client):
@@ -62,7 +62,7 @@ def test_live_server_blocks_uninstall(client):
 
     patch = client.patch(
         f"/api/servers/{server_id}/run-status",
-        json={"run_status": enums.RUN_NOT_LIVE},
+        json={"run_status": enums.RUN_NOT_LIVE, "work_order_no": "WO-TEST-001"},
         headers=op_headers(1),
     )
     assert patch.status_code == 200
@@ -101,9 +101,9 @@ def test_loan_requires_full_approval(client):
         headers=op_headers(a1["id"]),
     )
     assert r1.status_code == 200
-    part = client.get(f"/api/parts/{part_id}").json()
+    part = client.get(f"/api/parts/{part_id}", headers=op_headers(1)).json()
     assert part["current_status"] == enums.STATUS_IN_STOCK
-    moves = client.get(f"/api/parts/{part_id}/movements").json()
+    moves = client.get(f"/api/parts/{part_id}/movements", headers=op_headers(1)).json()
     assert all(m["event_type"] != enums.EVENT_LOAN for m in moves)
 
 
@@ -144,7 +144,7 @@ def test_stepwise_and_veto(client):
     )
     assert reject.status_code == 200
     assert reject.json()["overall_status"] == enums.APPROVAL_REJECTED
-    part = client.get(f"/api/parts/{part_id}").json()
+    part = client.get(f"/api/parts/{part_id}", headers=op_headers(1)).json()
     assert part["current_status"] == enums.STATUS_IN_STOCK
 
 
@@ -183,13 +183,12 @@ def test_approval_recusal(client):
 
 
 def test_operator_cannot_be_approver(client):
-    """操作员角色不能担任审批人。"""
+    """仅领导可担任审批人；主业/外委/供应商均不可。"""
     part_id = _stock_part_id(client)
     cast = demo_cast(client)
-    users = cast["users"]
-    assert cast["applicant"]["role"] == "操作员"
-    assert cast["other"]["role"] == "操作员"
-    assert cast["a1"]["role"] == "审批人"
+    assert cast["applicant"]["role"] == "主业运维"
+    assert cast["other"]["role"] == "设备供应商"
+    assert cast["a1"]["role"] == "领导"
     org = _org(client)
     r = client.post(
         "/api/approvals/loan",
@@ -197,13 +196,13 @@ def test_operator_cannot_be_approver(client):
             "part_id": part_id,
             "dest_org_id": org["id"],
             "expected_return_date": str(date.today() + timedelta(days=7)),
-            # other=钱仓管 为操作员
+            # other=钱仓管 为设备供应商，不可作审批人
             "approver_ids": [cast["a1"]["id"], cast["a2"]["id"], cast["other"]["id"]],
         },
         headers=op_headers(cast["applicant"]["id"]),
     )
     assert r.status_code == 400
-    assert "审批人" in r.json()["detail"]
+    assert "领导" in r.json()["detail"]
 
 
 def test_expected_return_date_required(client):
@@ -239,8 +238,8 @@ def test_append_only_and_replay(client, db_session):
         json={"storage_location_id": loc_id},
         headers=op_headers(1),
     )
-    part = client.get(f"/api/parts/{part_id}").json()
-    replayed = client.get(f"/api/parts/{part_id}/projected-from-log").json()
+    part = client.get(f"/api/parts/{part_id}", headers=op_headers(1)).json()
+    replayed = client.get(f"/api/parts/{part_id}/projected-from-log", headers=op_headers(1)).json()
     assert replayed["matches_cache"] is True
     assert part["current_status"] == replayed["current_status"]
     assert part["current_loc_kind"] == replayed["current_loc_kind"]
@@ -289,10 +288,11 @@ def test_non_designated_approver_rejected(client):
     assert "指定审批人" in r2.json()["detail"]
 
 
-def test_revalidate_in_stock_before_loan_movement(client):
+def test_revalidate_in_stock_before_loan_movement(client, db_session):
+    from app.models import Part
+
     part_id = _stock_part_id(client)
     cast = demo_cast(client)
-    users = cast["users"]
     applicant, a1, a2, a3 = cast["applicant"], cast["a1"], cast["a2"], cast["a3"]
     org = _org(client)
     server_id = _idle_server(client)
@@ -308,12 +308,14 @@ def test_revalidate_in_stock_before_loan_movement(client):
         headers=op_headers(applicant["id"]),
     ).json()["id"]
 
+    # 审批中禁止装机等变更
     inst = client.post(
         f"/api/parts/{part_id}/install",
         json={"server_id": server_id},
         headers=op_headers(applicant["id"]),
     )
-    assert inst.status_code == 200
+    assert inst.status_code == 400
+    assert "审批中" in inst.json()["detail"]
 
     client.post(
         f"/api/approvals/{approval_id}/decide",
@@ -325,6 +327,14 @@ def test_revalidate_in_stock_before_loan_movement(client):
         json={"level": 2, "approve": True},
         headers=op_headers(a2["id"]),
     )
+
+    # 模拟竞态：末级通过前状态已被外部改为在用
+    part_row = db_session.get(Part, part_id)
+    part_row.current_status = enums.STATUS_IN_USE
+    part_row.current_loc_kind = enums.LOC_SERVER
+    part_row.current_loc_id = server_id
+    db_session.commit()
+
     final = client.post(
         f"/api/approvals/{approval_id}/decide",
         json={"level": 3, "approve": True},
@@ -333,12 +343,12 @@ def test_revalidate_in_stock_before_loan_movement(client):
     assert final.status_code == 400
     assert "审批已作废" in final.json()["detail"]
 
-    part = client.get(f"/api/parts/{part_id}").json()
+    part = client.get(f"/api/parts/{part_id}", headers=op_headers(1)).json()
     assert part["current_status"] == enums.STATUS_IN_USE
-    moves = client.get(f"/api/parts/{part_id}/movements").json()
+    moves = client.get(f"/api/parts/{part_id}/movements", headers=op_headers(1)).json()
     assert all(m["event_type"] != enums.EVENT_LOAN for m in moves)
 
-    approval = client.get(f"/api/approvals/{approval_id}").json()
+    approval = client.get(f"/api/approvals/{approval_id}", headers=op_headers(1)).json()
     assert approval["overall_status"] == enums.APPROVAL_REJECTED
 
 
@@ -368,7 +378,7 @@ def test_illegal_start_status_install_on_loaned(client):
         )
         assert r.status_code == 200, r.text
 
-    part = client.get(f"/api/parts/{part_id}").json()
+    part = client.get(f"/api/parts/{part_id}", headers=op_headers(1)).json()
     assert part["current_status"] == enums.STATUS_LOANED
 
     bad = client.post(
@@ -409,9 +419,9 @@ def test_happy_path_full_loan_and_return(client):
             == 200
         )
 
-    part = client.get(f"/api/parts/{part_id}").json()
+    part = client.get(f"/api/parts/{part_id}", headers=op_headers(1)).json()
     assert part["current_status"] == enums.STATUS_LOANED
-    moves = client.get(f"/api/parts/{part_id}/movements").json()
+    moves = client.get(f"/api/parts/{part_id}/movements", headers=op_headers(1)).json()
     loan = [m for m in moves if m["event_type"] == enums.EVENT_LOAN][-1]
     assert loan["expected_return_date"] == str(expected)
     assert loan["approval_id"] == approval_id

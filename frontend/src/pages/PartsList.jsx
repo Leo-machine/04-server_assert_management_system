@@ -1,21 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { api } from '../api'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
+import { api, getStoredUser } from '../api'
 import HeaderFilter from '../components/HeaderFilter'
+import BatchOpModal from '../components/BatchOpModal'
 import ListToolbar from '../components/ListToolbar'
 import { useSelection } from '../hooks/useSelection'
 import { filterByQuery } from '../lib/fuzzy'
+import { OPS_ROLES, hasRole, homePathFor } from '../lib/roles'
+import { PART_CATEGORIES } from '../lib/categories'
+import { locLabel } from '../lib/locLabel'
 
-const CATEGORY_ORDER = [
-  '内存',
-  '机械硬盘',
-  '固态硬盘',
-  'RAID卡',
-  '光模块',
-  '网卡',
-  'HBA卡',
-  '算力卡',
-]
+const CATEGORY_ORDER = PART_CATEGORIES
 
 const CATEGORY_META = {
   内存: { color: '#005a9c' },
@@ -40,22 +35,6 @@ const STATUS_META = {
 const ALLOC_OPTIONS = ['通用可调', '保留']
 const LOC_KIND_OPTIONS = ['库位', '服务器', '外单位', '无']
 
-function locLabel(part, servers, locs, orgs) {
-  if (!part.current_loc_kind) return '-'
-  if (part.current_loc_kind === '库位') {
-    const loc = locs.find((l) => l.id === part.current_loc_id)
-    return loc ? `${loc.warehouse}/${loc.slot}` : `库位#${part.current_loc_id}`
-  }
-  if (part.current_loc_kind === '服务器') {
-    const s = servers.find((x) => x.id === part.current_loc_id)
-    return s ? `${s.asset_no}（${s.run_status}）` : `服务器#${part.current_loc_id}`
-  }
-  if (part.current_loc_kind === '外单位') {
-    const o = orgs.find((x) => x.id === part.current_loc_id)
-    return o ? o.org_name : `外单位#${part.current_loc_id}`
-  }
-  return part.current_loc_kind
-}
 
 function statusBadgeClass(status, overdue) {
   if (overdue) return 'pl-badge pl-badge-danger'
@@ -87,6 +66,12 @@ export default function PartsList() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [openFilter, setOpenFilter] = useState('') // status | alloc | loc | ''
+  const [batchOp, setBatchOp] = useState(null) // install/loan/transfer/scrap/damage
+  const [users, setUsers] = useState([])
+  const me = getStoredUser()
+  const canInstall = hasRole(me, OPS_ROLES)
+  const canLoan = hasRole(me, OPS_ROLES)
+  const canViewParts = hasRole(me, OPS_ROLES)
 
   function reload() {
     return Promise.all([
@@ -103,31 +88,25 @@ export default function PartsList() {
   }
 
   useEffect(() => {
+    if (!canViewParts) return undefined
     reload().catch((e) => setError(e.message))
-  }, [])
+  }, [canViewParts])
 
-  const categoryStats = useMemo(() => {
-    const map = {}
-    for (const cat of CATEGORY_ORDER) {
-      map[cat] = { total: 0, byStatus: {} }
+  // 搜索命中集（不含类型/表头列筛选），供分类卡片与列表共用
+  const searchedParts = useMemo(() => {
+    const tokens = query.split(/[,，、\s]+/).map((t) => t.trim()).filter(Boolean)
+    if (tokens.length > 1) {
+      return parts.filter((p) => {
+        const hay = [
+          p.fixed_asset_no, p.serial_no, p.owner_unit, p.allocatable_flag,
+          p.current_status, p.model?.category, p.model?.model_name,
+          p.model?.brand, p.model?.pn, p.supplier, p.project,
+          locLabel(p, servers, locs, orgs),
+        ].filter(Boolean).join(' ').toLowerCase()
+        return tokens.some((t) => hay.includes(t.toLowerCase()))
+      })
     }
-    for (const p of parts) {
-      const cat = p.model?.category || '未分类'
-      if (!map[cat]) map[cat] = { total: 0, byStatus: {} }
-      map[cat].total += 1
-      const st = p.current_status || '未知'
-      map[cat].byStatus[st] = (map[cat].byStatus[st] || 0) + 1
-    }
-    return map
-  }, [parts])
-
-  // 表头筛选项计数：受其它已选条件约束（不含本列自身），避免「在库 8」下仍显示可调配 808
-  const scopedParts = useMemo(() => {
-    const base = parts.filter((p) => {
-      if (filterCat && (p.model?.category || '') !== filterCat) return false
-      return true
-    })
-    return filterByQuery(base, query, (p) => [
+    return filterByQuery(parts, query, (p) => [
       p.fixed_asset_no,
       p.serial_no,
       p.owner_unit,
@@ -141,7 +120,13 @@ export default function PartsList() {
       p.project,
       locLabel(p, servers, locs, orgs),
     ])
-  }, [parts, filterCat, query, servers, locs, orgs])
+  }, [parts, query, servers, locs, orgs])
+
+  // 表头筛选项计数：受其它已选条件约束（不含本列自身），避免「在库 8」下仍显示可调配 808
+  const scopedParts = useMemo(() => {
+    if (!filterCat) return searchedParts
+    return searchedParts.filter((p) => (p.model?.category || '') === filterCat)
+  }, [searchedParts, filterCat])
 
   function applyOtherFilters(list, { skip } = {}) {
     return list.filter((p) => {
@@ -186,6 +171,22 @@ export default function PartsList() {
     () => applyOtherFilters(scopedParts),
     [scopedParts, filterStatus, filterAlloc, filterLocKind],
   )
+
+  // 分类卡片：受状态/可调配/位置/搜索约束，不受当前选中类型约束
+  const categoryStats = useMemo(() => {
+    const map = {}
+    for (const cat of CATEGORY_ORDER) {
+      map[cat] = { total: 0, byStatus: {} }
+    }
+    for (const p of applyOtherFilters(searchedParts)) {
+      const cat = p.model?.category || '未分类'
+      if (!map[cat]) map[cat] = { total: 0, byStatus: {} }
+      map[cat].total += 1
+      const st = p.current_status || '未知'
+      map[cat].byStatus[st] = (map[cat].byStatus[st] || 0) + 1
+    }
+    return map
+  }, [searchedParts, filterStatus, filterAlloc, filterLocKind])
 
   const visibleIds = useMemo(() => visible.map((p) => p.id), [visible])
   const sel = useSelection(visibleIds)
@@ -267,8 +268,46 @@ export default function PartsList() {
     if (okN > 0) setOk(`已更新 ${okN} 件为「${flag}」`)
   }
 
+  function eligibleFor(op) {
+    const selected = visible.filter((p) => sel.isSelected(p.id))
+    if (op === 'scrap') return selected.filter((p) => ['在库', '损坏'].includes(p.current_status))
+    return selected.filter((p) => p.current_status === '在库')
+  }
+
+  function openBatchOp(op) {
+    setError('')
+    const targets = eligibleFor(op)
+    if (!targets.length) {
+      setError(op === 'scrap'
+        ? '所选配件中没有「在库/损坏」项，无法批量报废'
+        : '所选配件中没有「在库」项（装机/借出/调拨/报损仅在库可操作）')
+      return
+    }
+    if (!users.length) {
+      api.get('/users').then(setUsers).catch(() => {})
+    }
+    setBatchOp(op)
+  }
+
+  async function onBatchDone({ okN, errors, opTitle }) {
+    setBatchOp(null)
+    setError('')
+    setOk('')
+    await reload()
+    sel.clear()
+    if (errors.length) {
+      setError(`${opTitle}：成功 ${okN} 件，失败 ${errors.length} 件——${errors.slice(0, 3).join('；')}${errors.length > 3 ? ' 等' : ''}`)
+    } else {
+      setOk(`${opTitle}：全部成功（${okN} 件）`)
+    }
+  }
+
   function openDetail(id) {
     nav(`/parts/${id}`)
+  }
+
+  if (!canViewParts) {
+    return <Navigate to={homePathFor(me)} replace />
   }
 
   return (
@@ -347,7 +386,7 @@ export default function PartsList() {
           setQuery(q)
           sel.clear()
         }}
-        placeholder="搜索资产编号 / 型号 / 品牌 / 位置 / 产权…"
+        placeholder="搜索资产编号 / 型号 / 品牌…（可用逗号分隔多编号批量显示）"
         resultText={
           <>
             显示 <strong>{visible.length}</strong>
@@ -361,21 +400,51 @@ export default function PartsList() {
         onClearSelection={sel.clear}
         batchActions={
           <>
-            <button
-              type="button"
-              disabled={batchBusy}
-              onClick={() => batchSetAlloc('通用可调')}
-            >
-              批量·通用可调
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              disabled={batchBusy}
-              onClick={() => batchSetAlloc('保留')}
-            >
-              批量·保留
-            </button>
+            {canLoan && (
+              <>
+                <span className="bt-group">
+                  <button type="button" disabled={batchBusy} onClick={() => batchSetAlloc('通用可调')}>
+                    通用可调
+                  </button>
+                  <button type="button" disabled={batchBusy} onClick={() => batchSetAlloc('保留')}>
+                    保留
+                  </button>
+                </span>
+                <span className="bt-sep" />
+              </>
+            )}
+            {(canInstall || canLoan) && (
+              <>
+                <span className="bt-group">
+                  {canInstall && (
+                    <button type="button" className="bt-primary" disabled={batchBusy} onClick={() => openBatchOp('install')}>
+                      装机
+                    </button>
+                  )}
+                  {canLoan && (
+                    <>
+                      <button type="button" disabled={batchBusy} onClick={() => openBatchOp('loan')}>
+                        借出
+                      </button>
+                      <button type="button" disabled={batchBusy} onClick={() => openBatchOp('transfer')}>
+                        调拨
+                      </button>
+                      <button type="button" disabled={batchBusy} onClick={() => openBatchOp('damage')}>
+                        报损
+                      </button>
+                    </>
+                  )}
+                </span>
+                {canLoan && (
+                  <>
+                    <span className="bt-sep" />
+                    <button type="button" className="bt-danger" disabled={batchBusy} onClick={() => openBatchOp('scrap')}>
+                      报废
+                    </button>
+                  </>
+                )}
+              </>
+            )}
           </>
         }
       />
@@ -509,20 +578,24 @@ export default function PartsList() {
                       <Link to={`/parts/${p.id}/history`}>履历</Link>
                       {p.current_status === '在库' && (
                         <>
-                          <Link to={`/parts/${p.id}/install`}>装机</Link>
-                          <Link to={`/parts/${p.id}/loan`}>借出</Link>
-                          <Link to={`/parts/${p.id}/transfer`}>调拨</Link>
-                          <Link to={`/parts/${p.id}/scrap`}>报废</Link>
-                          <Link to={`/parts/${p.id}/damage`}>报损</Link>
+                          {canInstall && <Link to={`/parts/${p.id}/install`}>装机</Link>}
+                          {canLoan && (
+                            <>
+                              <Link to={`/parts/${p.id}/loan`}>借出</Link>
+                              <Link to={`/parts/${p.id}/transfer`}>调拨</Link>
+                              <Link to={`/parts/${p.id}/scrap`}>报废</Link>
+                              <Link to={`/parts/${p.id}/damage`}>报损</Link>
+                            </>
+                          )}
                         </>
                       )}
-                      {p.current_status === '在用' && (
+                      {p.current_status === '在用' && canInstall && (
                         <Link to={`/parts/${p.id}/uninstall`}>拆下</Link>
                       )}
-                      {p.current_status === '损坏' && (
+                      {p.current_status === '损坏' && canLoan && (
                         <Link to={`/parts/${p.id}/scrap`}>报废</Link>
                       )}
-                      {p.current_status === '借出' && (
+                      {p.current_status === '借出' && canLoan && (
                         <Link to={`/parts/${p.id}/return`}>归还</Link>
                       )}
                     </div>
@@ -592,6 +665,19 @@ export default function PartsList() {
           <option value={50}>50 条/页</option>
         </select>
       </div>
+
+      {batchOp && (
+        <BatchOpModal
+          op={batchOp}
+          targets={eligibleFor(batchOp)}
+          servers={servers}
+          orgs={orgs}
+          users={users}
+          locs={locs}
+          onClose={() => setBatchOp(null)}
+          onDone={onBatchDone}
+        />
+      )}
     </div>
   )
 }

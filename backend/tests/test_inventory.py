@@ -11,7 +11,7 @@ def _mem_row(rows):
 
 def test_allocatable_summary_seed_baseline(client):
     """种子：1001+2001 计入；1002 保留 / 1003 在用 / 1004 外单位 不计。"""
-    r = client.get("/api/inventory/allocatable-summary", params={"category": "内存"})
+    r = client.get("/api/inventory/allocatable-summary", headers=op_headers(1), params={"category": "内存"})
     assert r.status_code == 200
     row = _mem_row(r.json())
     assert row["capacity_gb"] == 32
@@ -23,24 +23,24 @@ def test_allocatable_summary_seed_baseline(client):
 
 def test_allocatable_cross_model_aggregation(client):
     """同规格不同品牌型号合并为一行。"""
-    models = client.get("/api/part-models").json()
+    models = client.get("/api/part-models", headers=op_headers(1)).json()
     mem = [m for m in models if m["category"] == "内存"]
     assert len(mem) >= 2
     brands = {m["brand"] for m in mem if m["capacity_gb"] == 32 and m["ddr_gen"] == "DDR4"}
     assert "三星" in brands and "海力士" in brands
 
-    rows = client.get("/api/inventory/allocatable-summary", params={"category": "内存"}).json()
+    rows = client.get("/api/inventory/allocatable-summary", headers=op_headers(1), params={"category": "内存"}).json()
     assert len(rows) == 1
     assert rows[0]["allocatable_count"] == 2
 
 
 def test_reserve_flag_reduces_count(client):
-    parts = client.get("/api/parts").json()
+    parts = client.get("/api/parts", headers=op_headers(1)).json()
     target = next(p for p in parts if p["fixed_asset_no"] == "FA-MEM-1001")
     assert target["allocatable_flag"] == enums.ALLOC_GENERAL
 
     before = _mem_row(
-        client.get("/api/inventory/allocatable-summary", params={"category": "内存"}).json()
+        client.get("/api/inventory/allocatable-summary", headers=op_headers(1), params={"category": "内存"}).json()
     )["allocatable_count"]
 
     r = client.patch(
@@ -52,13 +52,13 @@ def test_reserve_flag_reduces_count(client):
     assert r.json()["allocatable_flag"] == enums.ALLOC_RESERVED
 
     after = _mem_row(
-        client.get("/api/inventory/allocatable-summary", params={"category": "内存"}).json()
+        client.get("/api/inventory/allocatable-summary", headers=op_headers(1), params={"category": "内存"}).json()
     )["allocatable_count"]
     assert after == before - 1
 
 
 def test_alloc_flag_blocked_when_not_in_stock(client):
-    parts = client.get("/api/parts").json()
+    parts = client.get("/api/parts", headers=op_headers(1)).json()
     in_use = next(p for p in parts if p["fixed_asset_no"] == "FA-MEM-1003")
     assert in_use["current_status"] == enums.STATUS_IN_USE
     r = client.patch(
@@ -71,13 +71,13 @@ def test_alloc_flag_blocked_when_not_in_stock(client):
 
 
 def test_install_reduces_allocatable(client):
-    parts = client.get("/api/parts").json()
+    parts = client.get("/api/parts", headers=op_headers(1)).json()
     target = next(p for p in parts if p["fixed_asset_no"] == "FA-MEM-1001")
-    servers = client.get("/api/servers").json()
+    servers = client.get("/api/servers", headers=op_headers(1)).json()
     idle = next(s for s in servers if s["run_status"] == enums.RUN_NOT_LIVE)
 
     before = _mem_row(
-        client.get("/api/inventory/allocatable-summary", params={"category": "内存"}).json()
+        client.get("/api/inventory/allocatable-summary", headers=op_headers(1), params={"category": "内存"}).json()
     )["allocatable_count"]
 
     r = client.post(
@@ -89,15 +89,15 @@ def test_install_reduces_allocatable(client):
     assert r.json()["current_status"] == enums.STATUS_IN_USE
 
     after = _mem_row(
-        client.get("/api/inventory/allocatable-summary", params={"category": "内存"}).json()
+        client.get("/api/inventory/allocatable-summary", headers=op_headers(1), params={"category": "内存"}).json()
     )["allocatable_count"]
     assert after == before - 1
 
 
 def test_inbound_public_fields_and_invalid_flag(client):
-    models = client.get("/api/part-models").json()
+    models = client.get("/api/part-models", headers=op_headers(1)).json()
     mem = next(m for m in models if m["category"] == "内存")
-    locs = client.get("/api/storage-locations").json()
+    locs = client.get("/api/storage-locations", headers=op_headers(1)).json()
 
     base = {
         "model_id": mem["id"],
@@ -109,7 +109,7 @@ def test_inbound_public_fields_and_invalid_flag(client):
         "purchase_amount": 500.00,
         "purchase_date": "2026-01-01",
         "sensitivity": "无",
-        "supplier": "测试供应商",
+        "supplier": "通用配件供应商",
         "project": "Demo03",
         "owner_unit": enums.HOME_OWNER_UNIT,
         "warranty_expiry": "2030-06-01",
@@ -131,14 +131,14 @@ def test_inbound_public_fields_and_invalid_flag(client):
     )
     assert ok.status_code == 200
     body = ok.json()
-    assert body["supplier"] == "测试供应商"
+    assert body["supplier"] == "通用配件供应商"
     assert body["project"] == "Demo03"
     assert body["owner_unit"] == enums.HOME_OWNER_UNIT
     assert body["warranty_expiry"] == "2030-06-01"
     assert body["allocatable_flag"] == enums.ALLOC_GENERAL
 
     count = _mem_row(
-        client.get("/api/inventory/allocatable-summary", params={"category": "内存"}).json()
+        client.get("/api/inventory/allocatable-summary", headers=op_headers(1), params={"category": "内存"}).json()
     )["allocatable_count"]
     assert count == 3  # seed 2 + 新入库
 

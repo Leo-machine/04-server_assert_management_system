@@ -37,7 +37,6 @@ _ACTION_RULES = {
     },
 }
 
-
 def _get_inflight_approval(db: Session, part_id: int) -> Optional[Approval]:
     """同一配件任意类型的「审批中」单（不限 action_type）。"""
     return db.scalars(
@@ -47,6 +46,14 @@ def _get_inflight_approval(db: Session, part_id: int) -> Optional[Approval]:
         )
     ).first()
 
+def assert_no_inflight_approval(db: Session, part_id: int) -> None:
+    """装机/拆下/报损/归还等变更前：禁止配件上存在审批中单据。"""
+    inflight = _get_inflight_approval(db, part_id)
+    if inflight is not None:
+        raise BusinessError(
+            f"配件存在审批中单据（#{inflight.id}「{inflight.action_type}」），"
+            f"请先完成或撤回后再操作"
+        )
 
 def _validate_people(
     db: Session, *, applicant_id: int, approver_ids: list[int]
@@ -67,7 +74,20 @@ def _validate_people(
     if missing:
         raise BusinessError(f"用户不存在: {missing}")
 
-    # 轻量权限：审批人须具备审批人/管理员角色
+    inactive = [
+        f"{users[uid].name}（{getattr(users[uid], 'status', None) or '未知'}）"
+        for uid in all_uids
+        if getattr(users[uid], "status", enums.USER_STATUS_ACTIVE)
+        != enums.USER_STATUS_ACTIVE
+    ]
+    if inactive:
+        raise BusinessError(
+            "申请人与审批人须为「正常」状态账号，下列用户不符合："
+            + "、".join(inactive)
+        )
+
+    # 轻量权限：审批人须具备允许审批的角色
+    approval_roles_display = " / ".join(enums.APPROVER_ROLES)
     bad = [
         f"{users[uid].name}（{users[uid].role or '无角色'}）"
         for uid in approver_ids
@@ -75,17 +95,15 @@ def _validate_people(
     ]
     if bad:
         raise BusinessError(
-            "审批人须为「审批人」或「管理员」角色，下列用户不符合："
+            f"审批人须为「{approval_roles_display}」角色，下列用户不符合："
             + "、".join(bad)
         )
-
 
 def _require_dest_org(db: Session, dest_org_id: Optional[int]) -> None:
     if dest_org_id is None:
         raise BusinessError("必须指定外单位")
     if db.get(ExternalOrg, dest_org_id) is None:
         raise BusinessError("外单位不存在")
-
 
 def _create_approval(
     db: Session,
@@ -142,7 +160,6 @@ def _create_approval(
     db.refresh(approval)
     return get_approval(db, approval.id)
 
-
 def create_loan_approval(
     db: Session,
     *,
@@ -169,7 +186,6 @@ def create_loan_approval(
         remark=remark,
     )
 
-
 def create_transfer_approval(
     db: Session,
     *,
@@ -191,7 +207,6 @@ def create_transfer_approval(
         reason_code=(reason_code or "").strip() or None,
         remark=remark,
     )
-
 
 def create_scrap_approval(
     db: Session,
@@ -230,7 +245,6 @@ def create_scrap_approval(
         remark=remark,
     )
 
-
 def get_approval(db: Session, approval_id: int) -> Approval:
     approval = db.scalars(
         select(Approval)
@@ -245,7 +259,6 @@ def get_approval(db: Session, approval_id: int) -> Approval:
     if approval is None:
         raise BusinessError("审批单不存在")
     return approval
-
 
 def list_approvals(db: Session) -> list[Approval]:
     return list(
@@ -263,7 +276,6 @@ def list_approvals(db: Session) -> list[Approval]:
         .all()
     )
 
-
 def withdraw_approval(
     db: Session, *, approval_id: int, operator_id: int
 ) -> Approval:
@@ -276,7 +288,6 @@ def withdraw_approval(
     approval.overall_status = enums.APPROVAL_WITHDRAWN
     db.commit()
     return get_approval(db, approval_id)
-
 
 def _void_approval(db: Session, approval: Approval, reason: str) -> None:
     """落履历前状态校验失败：审批作废（驳回 + 系统原因）。"""
@@ -295,7 +306,6 @@ def _void_approval(db: Session, approval: Approval, reason: str) -> None:
             )
             break
     db.commit()
-
 
 def decide_approval(
     db: Session,
@@ -319,6 +329,8 @@ def decide_approval(
         raise BusinessError("审批环节不存在")
     if operator_id != step.approver_id:
         raise BusinessError("非本级指定审批人，无权审批")
+    if step.step_status != enums.STEP_PENDING:
+        raise BusinessError("该级已审，不可重复审批")
 
     step.step_status = enums.STEP_APPROVED if approve else enums.STEP_REJECTED
     step.opinion = opinion

@@ -25,6 +25,18 @@ PART_CATEGORIES = (
 SERVER_CATEGORY = "服务器"
 ALL_MANAGED_CATEGORIES = PART_CATEGORIES + (SERVER_CATEGORY,)
 
+# 固定资产编号前缀（按品类自动生成：PREFIX-YYYYMMDD-NNN）
+CATEGORY_ASSET_PREFIX: dict[str, str] = {
+    "内存": "MEM",
+    "机械硬盘": "HDD",
+    "固态硬盘": "SSD",
+    "RAID卡": "RAID",
+    "光模块": "OPT",
+    "网卡": "NIC",
+    "HBA卡": "HBA",
+    "算力卡": "GPU",
+}
+
 # key: 字段名；type: number|string|enum；required；options 用于 enum；unit 仅展示
 # strict: True 表示必须从 options 中取值（驱动聚合列/正式列的字段），
 #         缺省为 False 表示 options 仅建议值、接受自定义输入

@@ -9,19 +9,19 @@ from tests.conftest import demo_cast, op_headers
 # ---------- 辅助 ----------
 
 def _users(client):
-    return client.get("/api/users").json()
+    return client.get("/api/users", headers=op_headers(1)).json()
 
 
 def _locs(client):
-    return client.get("/api/storage-locations").json()
+    return client.get("/api/storage-locations", headers=op_headers(1)).json()
 
 
 def _org(client):
-    return client.get("/api/external-orgs").json()[0]
+    return client.get("/api/external-orgs", headers=op_headers(1)).json()[0]
 
 
 def _parts(client):
-    return client.get("/api/parts").json()
+    return client.get("/api/parts", headers=op_headers(1)).json()
 
 
 def _stock_part_ids(client) -> list[int]:
@@ -44,13 +44,13 @@ def _approve_full(client, approval_id: int, approver_ids: list[int]):
 
 
 def _last_movement(client, part_id: int) -> dict:
-    moves = client.get(f"/api/parts/{part_id}/movements").json()
+    moves = client.get(f"/api/parts/{part_id}/movements", headers=op_headers(1)).json()
     assert moves, "应有履历"
     return moves[-1]
 
 
 def _inbound(client, *, sensitivity=None) -> int:
-    models = client.get("/api/part-models").json()
+    models = client.get("/api/part-models", headers=op_headers(1)).json()
     loc_id = _locs(client)[0]["id"]
     r = client.post(
         "/api/parts/inbound",
@@ -65,7 +65,7 @@ def _inbound(client, *, sensitivity=None) -> int:
             "purchase_amount": 1000.00,
             "purchase_date": "2026-01-01",
             "sensitivity": sensitivity or "无",
-            "supplier": "通用",
+            "supplier": "通用配件供应商",
             "project": "测试项目",
             "owner_unit": "本单位信息中心",
             "warranty_expiry": "2029-01-01",
@@ -107,7 +107,7 @@ def test_scrap_from_stock_full_flow(client):
     final = _approve_full(client, ap["id"], approvers)
     assert final["overall_status"] == enums.APPROVAL_APPROVED
 
-    part = client.get(f"/api/parts/{part_id}").json()
+    part = client.get(f"/api/parts/{part_id}", headers=op_headers(1)).json()
     assert part["current_status"] == enums.STATUS_SCRAPPED
     assert part["current_loc_kind"] == enums.LOC_NONE
     assert part["current_loc_id"] is None
@@ -166,7 +166,7 @@ def test_scrap_from_damaged(client):
     final = _approve_full(client, r.json()["id"], approvers)
     assert final["overall_status"] == enums.APPROVAL_APPROVED
 
-    part = client.get(f"/api/parts/{part_id}").json()
+    part = client.get(f"/api/parts/{part_id}", headers=op_headers(1)).json()
     assert part["current_status"] == enums.STATUS_SCRAPPED
     mv = _last_movement(client, part_id)
     assert mv["event_type"] == enums.EVENT_SCRAP
@@ -197,16 +197,17 @@ def test_scrap_rejected_writes_no_movement(client):
     assert r.status_code == 200
     assert r.json()["overall_status"] == enums.APPROVAL_REJECTED
 
-    part = client.get(f"/api/parts/{part_id}").json()
+    part = client.get(f"/api/parts/{part_id}", headers=op_headers(1)).json()
     assert part["current_status"] == enums.STATUS_IN_STOCK
-    moves = client.get(f"/api/parts/{part_id}/movements").json()
+    moves = client.get(f"/api/parts/{part_id}/movements", headers=op_headers(1)).json()
     assert all(m["event_type"] != enums.EVENT_SCRAP for m in moves)
 
 
-def test_scrap_voided_when_status_changed_before_final(client):
+def test_scrap_voided_when_status_changed_before_final(client, db_session):
+    from app.models import Part
+
     part_id = _stock_part_ids(client)[0]
     cast = demo_cast(client)
-    users = cast["users"]
     approvers = cast["approver_ids"]
 
     ap = client.post(
@@ -225,13 +226,20 @@ def test_scrap_voided_when_status_changed_before_final(client):
             headers=op_headers(uid),
         )
 
-    # 三级审批前配件被装机（在库 → 在用），不再满足报废起始状态
+    # 审批中禁止装机；竞态用 DB 直改模拟状态漂移
     r = client.post(
         f"/api/parts/{part_id}/install",
         json={"server_id": 2},
         headers=op_headers(cast["applicant"]["id"]),
     )
-    assert r.status_code == 200
+    assert r.status_code == 400
+    assert "审批中" in r.json()["detail"]
+
+    part_row = db_session.get(Part, part_id)
+    part_row.current_status = enums.STATUS_IN_USE
+    part_row.current_loc_kind = enums.LOC_SERVER
+    part_row.current_loc_id = 2
+    db_session.commit()
 
     final = client.post(
         f"/api/approvals/{ap['id']}/decide",
@@ -241,20 +249,20 @@ def test_scrap_voided_when_status_changed_before_final(client):
     assert final.status_code == 400
     assert "审批已作废" in final.json()["detail"]
 
-    part = client.get(f"/api/parts/{part_id}").json()
+    part = client.get(f"/api/parts/{part_id}", headers=op_headers(1)).json()
     assert part["current_status"] == enums.STATUS_IN_USE
-    moves = client.get(f"/api/parts/{part_id}/movements").json()
+    moves = client.get(f"/api/parts/{part_id}/movements", headers=op_headers(1)).json()
     assert all(m["event_type"] != enums.EVENT_SCRAP for m in moves)
-    ap_after = client.get(f"/api/approvals/{ap['id']}").json()
+    ap_after = client.get(f"/api/approvals/{ap['id']}", headers=op_headers(1)).json()
     assert ap_after["overall_status"] == enums.APPROVAL_REJECTED
     assert "系统作废" in ap_after["remark"]
 
 
 def _inbound_gpu(client) -> int:
     """入库一个在库算力卡（报废影像证据按类型强制的测试件）。"""
-    models = client.get("/api/part-models").json()
+    models = client.get("/api/part-models", headers=op_headers(1)).json()
     gpu = next(m for m in models if m["category"] == "算力卡")
-    locs = client.get("/api/storage-locations").json()
+    locs = client.get("/api/storage-locations", headers=op_headers(1)).json()
     loc = next(
         l for l in locs
         if not l.get("allowed_categories") or "算力卡" in l["allowed_categories"]
@@ -272,7 +280,7 @@ def _inbound_gpu(client) -> int:
             "contract_no": "HT-W1-001",
             "purchase_amount": 50000,
             "purchase_date": "2026-07-01",
-            "supplier": "测试供应商",
+            "supplier": "通用配件供应商",
             "project": "测试项目",
             "owner_unit": "本单位信息中心",
             "warranty_expiry": "2028-07-01",
@@ -335,9 +343,9 @@ def test_scrap_non_gpu_no_attachment(client):
 
 def test_inbound_rejects_location_category_mismatch(client):
     """后端必须校验库位 allowed_categories，不能只靠前端过滤。"""
-    models = client.get("/api/part-models").json()
+    models = client.get("/api/part-models", headers=op_headers(1)).json()
     mem = next(m for m in models if m["category"] == "内存")
-    locs = client.get("/api/storage-locations").json()
+    locs = client.get("/api/storage-locations", headers=op_headers(1)).json()
     # seed: Rack-D-12 仅允许 GPU卡/算力卡
     restricted = next(
         (l for l in locs if l.get("allowed_categories") and "内存" not in (l.get("allowed_categories") or [])),
@@ -427,7 +435,7 @@ def test_transfer_full_flow(client):
     final = _approve_full(client, ap["id"], approvers)
     assert final["overall_status"] == enums.APPROVAL_APPROVED
 
-    part = client.get(f"/api/parts/{part_id}").json()
+    part = client.get(f"/api/parts/{part_id}", headers=op_headers(1)).json()
     assert part["current_status"] == enums.STATUS_TRANSFERRED
     assert part["current_loc_kind"] == enums.LOC_EXTERNAL
     assert part["current_loc_id"] == org["id"]
@@ -473,7 +481,7 @@ def test_transfer_from_damaged_blocked(client):
 
 def test_uninstall_damaged_goes_to_damaged(client):
     parts = _parts(client)
-    servers = {s["id"]: s for s in client.get("/api/servers").json()}
+    servers = {s["id"]: s for s in client.get("/api/servers", headers=op_headers(1)).json()}
     idle = next(
         p
         for p in parts
@@ -497,7 +505,7 @@ def test_uninstall_damaged_goes_to_damaged(client):
 
 def test_live_server_blocks_damaged_uninstall(client):
     parts = _parts(client)
-    servers = {s["id"]: s for s in client.get("/api/servers").json()}
+    servers = {s["id"]: s for s in client.get("/api/servers", headers=op_headers(1)).json()}
     live = next(
         p
         for p in parts
@@ -577,7 +585,7 @@ def test_withdraw_by_applicant_and_reapply(client):
     assert r.json()["overall_status"] == enums.APPROVAL_WITHDRAWN
 
     # 撤回不写履历
-    moves = client.get(f"/api/parts/{part_id}/movements").json()
+    moves = client.get(f"/api/parts/{part_id}/movements", headers=op_headers(1)).json()
     assert all(m["event_type"] != enums.EVENT_SCRAP for m in moves)
 
     # 撤回后可重新发起
@@ -704,7 +712,7 @@ def test_brand_rename_cascades_and_delete_guard(client):
         f"/api/brands/{brand_id}", json={"name": "测试品牌Y"}, headers=op_headers(1)
     )
     assert r2.status_code == 200
-    models = client.get("/api/part-models?category=内存").json()
+    models = client.get("/api/part-models?category=内存", headers=op_headers(1)).json()
     renamed = [m for m in models if m["model_name"] == "测试品牌X 16G DDR4"]
     assert renamed and renamed[0]["brand"] == "测试品牌Y"
 
@@ -726,7 +734,7 @@ def test_surplus_rescan_is_idempotent(client):
             headers=op_headers(1),
         )
         assert r.status_code == 200
-    st_after = client.get(f"/api/stocktakes/{st['id']}").json()
+    st_after = client.get(f"/api/stocktakes/{st['id']}", headers=op_headers(1)).json()
     surplus = [i for i in st_after["items"] if i["result"] == enums.RESULT_SURPLUS]
     assert len(surplus) == 1
 

@@ -16,13 +16,14 @@ router = APIRouter(prefix="/brands", tags=["brands"])
 
 def _require_admin(user: User) -> None:
     """基础数据管理仅管理员。"""
-    require_role(user, (enums.ROLE_ADMIN,))
+    require_role(user, (enums.ROLE_LEADER,))
 
 
 @router.get("", response_model=list[BrandOut])
 def list_brands(
     category: Optional[str] = Query(None, description="按配件类型过滤，如 内存"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         return brands_service.list_brands(db, category=category)

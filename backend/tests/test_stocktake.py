@@ -8,29 +8,29 @@ from tests.conftest import demo_cast, op_headers
 
 
 def _stock_part(client):
-    for p in client.get("/api/parts").json():
+    for p in client.get("/api/parts", headers=op_headers(1)).json():
         if p["current_status"] == enums.STATUS_IN_STOCK:
             return p
     raise AssertionError("需要在库配件")
 
 
 def _idle_server(client):
-    for s in client.get("/api/servers").json():
+    for s in client.get("/api/servers", headers=op_headers(1)).json():
         if s["run_status"] == enums.RUN_NOT_LIVE:
             return s
     raise AssertionError("需要未投运服务器")
 
 
 def _locs(client):
-    return client.get("/api/storage-locations").json()
+    return client.get("/api/storage-locations", headers=op_headers(1)).json()
 
 
 def _users(client):
-    return client.get("/api/users").json()
+    return client.get("/api/users", headers=op_headers(1)).json()
 
 
 def _org(client):
-    return client.get("/api/external-orgs").json()[0]
+    return client.get("/api/external-orgs", headers=op_headers(1)).json()[0]
 
 
 def _loan_part_via_mainline(client, part_id: int) -> None:
@@ -55,7 +55,7 @@ def _loan_part_via_mainline(client, part_id: int) -> None:
             headers=op_headers(approver["id"]),
         )
         assert r.status_code == 200, r.text
-    assert client.get(f"/api/parts/{part_id}").json()["current_status"] == enums.STATUS_LOANED
+    assert client.get(f"/api/parts/{part_id}", headers=op_headers(1)).json()["current_status"] == enums.STATUS_LOANED
 
 
 def test_snapshot_frozen_after_realtime_install(client):
@@ -82,19 +82,19 @@ def test_snapshot_frozen_after_realtime_install(client):
         == 200
     )
 
-    st2 = client.get(f"/api/stocktakes/{st['id']}").json()
+    st2 = client.get(f"/api/stocktakes/{st['id']}", headers=op_headers(1)).json()
     item2 = next(i for i in st2["items"] if i["part_id"] == part["id"])
     assert item2["expected_loc_kind"] == expected_kind
     assert item2["expected_loc_id"] == expected_id
     # 实时已变，但快照不变
-    live = client.get(f"/api/parts/{part['id']}").json()
+    live = client.get(f"/api/parts/{part['id']}", headers=op_headers(1)).json()
     assert live["current_loc_kind"] == enums.LOC_SERVER
     assert live["current_loc_id"] == server["id"]
 
 
 def test_shortage_does_not_touch_part_or_movements(client):
     part = _stock_part(client)
-    before_moves = client.get(f"/api/parts/{part['id']}/movements").json()
+    before_moves = client.get(f"/api/parts/{part['id']}/movements", headers=op_headers(1)).json()
     before_status = part["current_status"]
 
     st = client.post(
@@ -112,8 +112,8 @@ def test_shortage_does_not_touch_part_or_movements(client):
     assert r.json()["result"] == enums.RESULT_SHORTAGE
     assert r.json()["discrepancy"]["status"] == enums.DISC_STATUS_HOLD
 
-    after = client.get(f"/api/parts/{part['id']}").json()
-    after_moves = client.get(f"/api/parts/{part['id']}/movements").json()
+    after = client.get(f"/api/parts/{part['id']}", headers=op_headers(1)).json()
+    after_moves = client.get(f"/api/parts/{part['id']}/movements", headers=op_headers(1)).json()
     assert after["current_status"] == before_status
     assert after["current_loc_kind"] == part["current_loc_kind"]
     assert after["current_loc_id"] == part["current_loc_id"]
@@ -132,7 +132,7 @@ def test_shortage_hold_and_no_offset_api(client):
         json={"scanned_asset_no": part["fixed_asset_no"], "missing": True},
         headers=op_headers(1),
     )
-    discs = client.get(f"/api/stocktakes/{st['id']}/discrepancies").json()
+    discs = client.get(f"/api/stocktakes/{st['id']}/discrepancies", headers=op_headers(1)).json()
     shortage = next(d for d in discs if d["discrepancy_type"] == enums.DISC_SHORTAGE)
     assert shortage["status"] == enums.DISC_STATUS_HOLD
 
@@ -235,24 +235,24 @@ def test_complete_requires_no_pending(client):
         headers=op_headers(1),
     )
 
-    before_part = client.get(f"/api/parts/{part['id']}").json()
-    before_moves = len(client.get(f"/api/parts/{part['id']}/movements").json())
+    before_part = client.get(f"/api/parts/{part['id']}", headers=op_headers(1)).json()
+    before_moves = len(client.get(f"/api/parts/{part['id']}/movements", headers=op_headers(1)).json())
     done = client.post(
         f"/api/stocktakes/{st['id']}/complete",
         headers=op_headers(1),
     )
     assert done.status_code == 200, done.text
     assert done.json()["status"] == enums.STOCKTAKE_COMPLETED
-    after_part = client.get(f"/api/parts/{part['id']}").json()
+    after_part = client.get(f"/api/parts/{part['id']}", headers=op_headers(1)).json()
     assert after_part["current_status"] == before_part["current_status"]
-    assert len(client.get(f"/api/parts/{part['id']}/movements").json()) == before_moves
+    assert len(client.get(f"/api/parts/{part['id']}/movements", headers=op_headers(1)).json()) == before_moves
 
 
 def test_check_three_branches_match_misplace_surplus(client):
     locs = _locs(client)
     parts = [
         p
-        for p in client.get("/api/parts").json()
+        for p in client.get("/api/parts", headers=op_headers(1)).json()
         if p["current_status"] == enums.STATUS_IN_STOCK
     ]
     assert len(parts) >= 2

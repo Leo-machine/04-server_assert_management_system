@@ -213,7 +213,7 @@ export default function PartModels() {
     <div className="panel">
       <h2>配件型号管理</h2>
       <p className="muted">
-        系统管理员在此维护八类配件型号与规格字段。入库时按类型选择型号，规格随型号带入，确保数据可用、有价值。
+        领导在此维护八类配件型号与规格字段。入库时按类型选择型号，规格随型号带入，确保数据可用、有价值。
       </p>
       {error && <div className="error">{error}</div>}
       {ok && <div className="ok-msg">{ok}</div>}

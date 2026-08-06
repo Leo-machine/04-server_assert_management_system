@@ -4,14 +4,14 @@ from tests.conftest import op_headers
 
 
 def test_list_brands_filter_by_category(client):
-    mem = client.get("/api/brands", params={"category": "内存"}).json()
+    mem = client.get("/api/brands", params={"category": "内存"}, headers=op_headers(1)).json()
     names = {b["name"] for b in mem}
     assert "三星" in names
     assert "海力士" in names
     assert "希捷" not in names  # 仅机械硬盘
     assert "戴尔" in names  # 通用（未标注）
 
-    disk = client.get("/api/brands", params={"category": "机械硬盘"}).json()
+    disk = client.get("/api/brands", params={"category": "机械硬盘"}, headers=op_headers(1)).json()
     disk_names = {b["name"] for b in disk}
     assert "希捷" in disk_names
     assert "海力士" not in disk_names
@@ -28,9 +28,9 @@ def test_create_brand_with_categories(client):
     body = r.json()
     assert body["categories"] == ["内存", "固态硬盘"]
 
-    mem = client.get("/api/brands", params={"category": "内存"}).json()
+    mem = client.get("/api/brands", params={"category": "内存"}, headers=op_headers(1)).json()
     assert any(b["name"] == "金士顿-测试" for b in mem)
-    raid = client.get("/api/brands", params={"category": "RAID卡"}).json()
+    raid = client.get("/api/brands", params={"category": "RAID卡"}, headers=op_headers(1)).json()
     assert all(b["name"] != "金士顿-测试" for b in raid)
 
 

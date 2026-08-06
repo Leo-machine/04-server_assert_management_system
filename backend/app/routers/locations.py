@@ -23,12 +23,16 @@ router = APIRouter(prefix="/storage-locations", tags=["storage-locations"])
 def list_locations(
     category: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     return locations_service.list_locations(db, category=category)
 
 
 @router.get("/distribution", response_model=list[LocationDistributionOut])
-def distribution(db: Session = Depends(get_db)):
+def distribution(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     return locations_service.location_distribution(db)
 
 
@@ -38,7 +42,7 @@ def create_location(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_role(current_user, (enums.ROLE_ADMIN,))
+    require_role(current_user, (enums.ROLE_LEADER,))
     try:
         return locations_service.create_location(db, **body.model_dump())
     except BusinessError as e:
@@ -52,7 +56,7 @@ def update_location(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_role(current_user, (enums.ROLE_ADMIN,))
+    require_role(current_user, (enums.ROLE_LEADER,))
     try:
         return locations_service.update_location(
             db, location_id, **body.model_dump(exclude_unset=True)
@@ -67,7 +71,7 @@ def delete_location(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_role(current_user, (enums.ROLE_ADMIN,))
+    require_role(current_user, (enums.ROLE_LEADER,))
     try:
         locations_service.delete_location(db, location_id)
     except BusinessError as e:

@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 import ApproverSelects, { useDefaultApprovers } from '../components/ApproverSelects'
+import { SCRAP_REASONS } from '../lib/categories'
 
-const REASON_CODES = ['本单位销毁', '返厂换新']
+const REASON_CODES = SCRAP_REASONS
 
 export default function Scrap() {
   const { id } = useParams()
@@ -25,14 +26,18 @@ export default function Scrap() {
       .catch((e) => setError(e.message))
   }, [id])
 
-  const sensitive = ["管控", "出口管制"].includes(part?.sensitivity)
+  const needAttachment = part?.model?.category === '算力卡'
 
   async function onSubmit(e) {
     e.preventDefault()
     setError('')
     const ids = approvers.map(Number)
     if (ids.some((n) => !n) || new Set(ids).size !== 3) {
-      setError('请选择三位互不相同的审批人（须为审批人/管理员角色）')
+      setError('请选择三位互不相同的审批人（须为领导）')
+      return
+    }
+    if (needAttachment && !attachmentRef.trim()) {
+      setError('算力卡报废必须填写影像证据引用')
       return
     }
     try {
@@ -58,13 +63,14 @@ export default function Scrap() {
       {part && (
         <p className="muted">
           {part.fixed_asset_no} · 当前状态 {part.current_status}
+          {part.model?.category ? ` · ${part.model.category}` : ''}
           {part.sensitivity && part.sensitivity !== '无'
             ? ` · ${part.sensitivity}件`
             : ''}
         </p>
       )}
       <p className="muted">
-        报废一律审批，通过后为终态不可恢复。申请人 = 当前操作人；三级审批人须互不相同。
+        报废一律审批，通过后为终态不可恢复。申请人 = 当前操作人；三级审批人须为领导且互不相同。
       </p>
       {error && <div className="error">{error}</div>}
       <form onSubmit={onSubmit}>
@@ -77,12 +83,12 @@ export default function Scrap() {
           </select>
         </label>
         <label>
-          影像证据引用{sensitive ? '（管控/敏感件必填）' : '（可选）'}
+          影像证据引用{needAttachment ? '（算力卡必填）' : '（可选）'}
           <input
             value={attachmentRef}
             onChange={(e) => setAttachmentRef(e.target.value)}
             placeholder="如 工单号/影像档案编号"
-            required={sensitive}
+            required={needAttachment}
           />
         </label>
         <ApproverSelects users={users} value={approvers} onChange={setApprovers} />

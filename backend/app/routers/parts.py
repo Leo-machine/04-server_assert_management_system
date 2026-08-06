@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from .. import enums
 from ..database import get_db
-from ..deps import get_operator_id, require_user
+from ..deps import get_current_user, get_operator_id, require_role
+from ..models import User
 from ..models import Part
 from ..schemas import (
     DamageIn,
@@ -60,7 +61,11 @@ def _part_out(db: Session, part: Part) -> PartOut:
 
 
 @router.get("/parts", response_model=list[PartOut])
-def list_parts(db: Session = Depends(get_db)):
+def list_parts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_role(current_user, enums.VIEW_PARTS_ROLES)
     parts = list(
         db.scalars(
             select(Part).options(joinedload(Part.model)).order_by(Part.id)
@@ -74,20 +79,40 @@ def export_parts(
     category: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
+    require_role(current_user, enums.INVENTORY_ROLES)
     return _csv_response(
         parts_batch_service.export_parts_csv(db, category=category),
         "parts_export.csv",
     )
 
 
+@router.get("/parts/next-asset-no")
+def next_asset_no(
+    category: str = Query(..., description="配件类型，如：内存"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """返回指定类型当天的下一个建议固定资产编号（仅供前端预填）。"""
+    require_role(current_user, enums.INBOUND_ROLES)
+    try:
+        no = parts_service.generate_next_fixed_asset_no(db, category)
+        return {"fixed_asset_no": no, "category": category}
+    except BusinessError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+
+
 @router.get("/parts/import-template.csv")
 def parts_import_template(
     category: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
     operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
+    require_role(current_user, enums.INBOUND_ROLES)
     return _csv_response(
-        parts_batch_service.import_template_csv(category=category),
+        parts_batch_service.import_template_csv(db, category=category),
         "parts_import_template.csv",
     )
 
@@ -98,9 +123,10 @@ def batch_import_parts(
     dry_run: bool = Query(True),
     db: Session = Depends(get_db),
     operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
     """两段式批量入库：dry_run=true 校验预览；dry_run=false 整批通过才入库。"""
-    require_user(db, operator_id)
+    require_role(current_user, enums.INBOUND_ROLES)
     try:
         return parts_batch_service.batch_import_parts(
             db, body.content, operator_id=operator_id, dry_run=dry_run
@@ -110,7 +136,12 @@ def batch_import_parts(
 
 
 @router.get("/parts/{part_id}", response_model=PartOut)
-def get_part(part_id: int, db: Session = Depends(get_db)):
+def get_part(
+    part_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_role(current_user, enums.VIEW_PARTS_ROLES)
     part = db.scalars(
         select(Part).options(joinedload(Part.model)).where(Part.id == part_id)
     ).unique().first()
@@ -120,14 +151,24 @@ def get_part(part_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/parts/{part_id}/movements", response_model=list[MovementOut])
-def get_movements(part_id: int, db: Session = Depends(get_db)):
+def get_movements(
+    part_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_role(current_user, enums.VIEW_PARTS_ROLES)
     if db.get(Part, part_id) is None:
         raise HTTPException(status_code=404, detail="配件不存在")
     return list_movements(db, part_id)
 
 
 @router.get("/parts/{part_id}/projected-from-log", response_model=ReplayOut)
-def projected_from_log(part_id: int, db: Session = Depends(get_db)):
+def projected_from_log(
+    part_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_role(current_user, enums.VIEW_PARTS_ROLES)
     part = db.get(Part, part_id)
     if part is None:
         raise HTTPException(status_code=404, detail="配件不存在")
@@ -145,8 +186,9 @@ def inbound(
     body: InboundIn,
     db: Session = Depends(get_db),
     operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    require_role(current_user, enums.INBOUND_ROLES)
     try:
         part = parts_service.inbound(db, operator_id=operator_id, **body.model_dump())
     except BusinessError as e:
@@ -163,9 +205,10 @@ def patch_part_public(
     body: PartPublicUpdateIn,
     db: Session = Depends(get_db),
     operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
     """更新实物公共字段（供应商/项目/产权/维保/可调配标记），不写履历。"""
-    require_user(db, operator_id)
+    require_role(current_user, enums.LOAN_RETURN_ROLES)
     try:
         part = parts_service.update_public_fields(
             db, part_id=part_id, **body.model_dump()
@@ -184,8 +227,9 @@ def install(
     body: InstallIn,
     db: Session = Depends(get_db),
     operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    require_role(current_user, enums.INSTALL_UNINSTALL_ROLES)
     try:
         part = parts_service.install(
             db,
@@ -207,8 +251,9 @@ def uninstall(
     body: UninstallIn,
     db: Session = Depends(get_db),
     operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    require_role(current_user, enums.INSTALL_UNINSTALL_ROLES)
     try:
         part = parts_service.uninstall(
             db,
@@ -230,8 +275,9 @@ def damage(
     body: DamageIn,
     db: Session = Depends(get_db),
     operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    require_role(current_user, enums.LOAN_RETURN_ROLES)
     try:
         part = parts_service.report_damage(
             db,
@@ -253,8 +299,9 @@ def return_part(
     body: ReturnIn,
     db: Session = Depends(get_db),
     operator_id: int = Depends(get_operator_id),
+    current_user: User = Depends(get_current_user),
 ):
-    require_user(db, operator_id)
+    require_role(current_user, enums.LOAN_RETURN_ROLES)
     try:
         part = parts_service.return_from_loan(
             db,
@@ -268,75 +315,3 @@ def return_part(
         select(Part).options(joinedload(Part.model)).where(Part.id == part.id)
     ).unique().one()
     return _part_out(db, part)
-
-
-# ----- 模板导出 / 批量导入 -----
-INBOUND_CSV_HEADER = (
-    "固定资产编号,序列号SN,型号ID,来源,运维部门,供应商,合同号,所属项目,"
-    "采购金额,到货验收日期,产权单位,维保到期,可调配标记,敏感标记,备注"
-)
-
-
-@router.get("/parts/inbound/template")
-def download_template(category: str):
-    from fastapi.responses import PlainTextResponse
-    example = (
-        f"FA-XXX-001,SN-001,1,独立合同采购,基础组,供应商名,HT-2026-001,演示项目,"
-        f"1000.00,2026-01-01,本单位信息中心,2029-01-01,通用可调,无,{category}入库示例"
-    )
-    return PlainTextResponse(
-        f"{INBOUND_CSV_HEADER}\n{example}",
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=inbound-{category}.csv"},
-    )
-
-
-@router.post("/parts/inbound/batch")
-def batch_inbound(
-    body: dict,
-    db: Session = Depends(get_db),
-    operator_id: int = Depends(get_operator_id),
-):
-    import csv
-    import io
-
-    require_user(db, operator_id)
-    csv_text = (body.get("csv_text") or "").strip()
-    loc_id = body.get("storage_location_id")
-    if not csv_text:
-        raise HTTPException(status_code=400, detail="CSV 内容为空")
-    if not loc_id:
-        raise HTTPException(status_code=400, detail="请选择存放位置")
-
-    reader = csv.DictReader(io.StringIO(csv_text))
-    ok_list = []
-    errors = []
-    for i, row in enumerate(reader, start=1):
-        try:
-            part = parts_service.inbound(
-                db,
-                operator_id=operator_id,
-                model_id=int(row.get("型号ID", "0")),
-                fixed_asset_no=(row.get("固定资产编号") or "").strip(),
-                storage_location_id=int(loc_id),
-                source_type=row.get("来源") or enums.SOURCE_CONTRACT,
-                responsible_group=row.get("运维部门") or "基础组",
-                serial_no=(row.get("序列号SN") or "").strip(),
-                contract_no=(row.get("合同号") or "").strip(),
-                purchase_amount=float(row.get("采购金额") or 0),
-                purchase_date=row.get("到货验收日期") or row.get("采购日期") or "2026-01-01",
-                sensitivity=row.get("敏感标记") or "无",
-                supplier=(row.get("供应商") or "").strip(),
-                project=(row.get("所属项目") or row.get("项目") or "批量导入").strip(),
-                owner_unit=(row.get("产权单位") or "本单位信息中心").strip(),
-                warranty_expiry=row.get("维保到期") or "2029-01-01",
-                allocatable_flag=row.get("可调配标记") or "通用可调",
-                remark=(row.get("备注") or "").strip(),
-            )
-            ok_list.append(part.fixed_asset_no)
-        except BusinessError as e:
-            errors.append(f"第{i}行: {e.message}")
-        except Exception as e:
-            errors.append(f"第{i}行: {e}")
-
-    return {"ok": len(ok_list), "errors": errors, "items": ok_list}

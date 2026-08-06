@@ -75,19 +75,36 @@ export const api = {
   delete: (path) => request(path, { method: 'DELETE' }),
 }
 
-/** 触发 CSV 文件下载 */
-export async function downloadCsv(url, fallbackName = 'export.csv') {
+/** 触发 CSV 文件下载（路径与 api.get 一致，自动加 /api 前缀） */
+export async function downloadCsv(path, fallbackName = 'export.csv') {
   const token = getToken()
+  const url = path.startsWith('/api') ? path : `/api${path.startsWith('/') ? path : `/${path}`}`
   const res = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
-  if (!res.ok) throw new Error(`下载失败: ${res.status}`)
+  if (!res.ok) {
+    if (res.status === 401) {
+      clearToken()
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
+    let msg = `下载失败: ${res.status}`
+    try {
+      const data = await res.json()
+      const detail = data?.detail
+      if (typeof detail === 'string') msg = detail
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg)
+  }
   const blob = await res.blob()
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   const disp = res.headers.get('Content-Disposition') || ''
-  const m = disp.match(/filename="?(.+?)"?$/i)
-  a.download = m?.[1] || fallbackName
+  const m = disp.match(/filename\*?=(?:UTF-8''|")?([^\";]+)"?/i)
+  a.download = decodeURIComponent(m?.[1] || fallbackName)
   a.click()
   URL.revokeObjectURL(a.href)
 }
