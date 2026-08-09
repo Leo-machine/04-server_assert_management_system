@@ -12,6 +12,8 @@ export default function AllocatableSummary() {
   const me = getStoredUser()
   const canView = hasRole(me, OPS_ROLES)
   const [rows, setRows] = useState([])
+  const [allRows, setAllRows] = useState([])
+  const [parts, setParts] = useState([])
   const [category, setCategory] = useState('内存')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -21,8 +23,7 @@ export default function AllocatableSummary() {
     setLoading(true)
     setError('')
     const q = cat ? `?category=${encodeURIComponent(cat)}` : ''
-    api
-      .get(`/inventory/allocatable-summary${q}`)
+    api.get(`/inventory/allocatable-summary${q}`)
       .then(setRows)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
@@ -32,6 +33,19 @@ export default function AllocatableSummary() {
     if (!canView) return undefined
     load(category)
   }, [category, canView])
+
+  useEffect(() => {
+    if (!canView) return undefined
+    Promise.all([
+      api.get('/inventory/allocatable-summary'),
+      api.get('/parts'),
+    ])
+      .then(([overviewRows, allParts]) => {
+        setAllRows(overviewRows)
+        setParts(allParts)
+      })
+      .catch((e) => setError(e.message))
+  }, [canView])
 
   const visible = useMemo(
     () =>
@@ -54,6 +68,36 @@ export default function AllocatableSummary() {
     const total = sorted.reduce((s, r) => s + (r.allocatable_count || 0), 0)
     return { sorted, max, total, specs: sorted.length }
   }, [visible])
+
+  const panorama = useMemo(() => {
+    const statuses = {}
+    for (const part of parts) {
+      const status = part.current_status || '未知'
+      statuses[status] = (statuses[status] || 0) + 1
+    }
+    const byCategory = Object.fromEntries(
+      PART_CATEGORIES.map((cat) => [cat, 0]),
+    )
+    for (const row of allRows) {
+      byCategory[row.category] = (byCategory[row.category] || 0) + (row.allocatable_count || 0)
+    }
+    const allocatable = Object.values(byCategory).reduce((sum, count) => sum + count, 0)
+    const inStock = statuses['在库'] || 0
+    const occupied = Math.max(0, parts.length - inStock)
+    const reserved = Math.max(0, inStock - allocatable)
+    const maxCategory = Math.max(1, ...Object.values(byCategory))
+    return {
+      total: parts.length,
+      inStock,
+      occupied,
+      allocatable,
+      reserved,
+      statuses,
+      byCategory,
+      maxCategory,
+      allocRate: inStock ? (allocatable / inStock) * 100 : 0,
+    }
+  }, [parts, allRows])
 
   if (!canView) {
     return <Navigate to={homePathFor(me)} replace />
@@ -91,6 +135,76 @@ export default function AllocatableSummary() {
       </header>
 
       {error && <div className="error">{error}</div>}
+
+      <section className="as-panorama" aria-labelledby="as-panorama-title">
+        <div className="as-section-title as-panorama-head">
+          <div>
+            <h3 id="as-panorama-title">库存全景图</h3>
+            <span className="muted">全品类实时口径 · 从资产总量到可调能力</span>
+          </div>
+          <span className="as-panorama-time">当前数据</span>
+        </div>
+
+        <div className="as-flow" role="img" aria-label={`共 ${panorama.total} 件配件，在库 ${panorama.inStock} 件，通用可调 ${panorama.allocatable} 件`}>
+          <div className="as-flow-node as-flow-total">
+            <span className="as-flow-kicker">资产池</span>
+            <strong>{panorama.total}</strong>
+            <small>全部配件</small>
+          </div>
+          <span className="as-flow-arrow" aria-hidden="true">→</span>
+          <div className="as-flow-branch">
+            <div className="as-flow-node as-flow-stock">
+              <span className="as-flow-kicker">库内资源</span>
+              <strong>{panorama.inStock}</strong>
+              <small>在库 · 可继续分配</small>
+            </div>
+            <div className="as-flow-node as-flow-occupied">
+              <span className="as-flow-kicker">已离库 / 占用</span>
+              <strong>{panorama.occupied}</strong>
+              <small>在用、借出、损坏等</small>
+            </div>
+          </div>
+          <span className="as-flow-arrow" aria-hidden="true">→</span>
+          <div className="as-flow-branch as-flow-result">
+            <div className="as-flow-node as-flow-alloc">
+              <span className="as-flow-kicker">核心可调能力</span>
+              <strong>{panorama.allocatable}</strong>
+              <small>本单位产权 ∩ 通用可调</small>
+              <em>{panorama.allocRate.toFixed(0)}% 在库可调率</em>
+            </div>
+            <div className="as-flow-node as-flow-reserved">
+              <span className="as-flow-kicker">保留 / 其他</span>
+              <strong>{panorama.reserved}</strong>
+              <small>保留标记或非本单位产权</small>
+            </div>
+          </div>
+        </div>
+
+        <div className="as-category-map" aria-label="各品类可调数量">
+          <div className="as-category-map-title">
+            <strong>全品类可调能力</strong>
+            <span className="muted">条形长度表示各品类可调数量</span>
+          </div>
+          <div className="as-category-grid">
+            {PART_CATEGORIES.map((cat) => {
+              const count = panorama.byCategory[cat] || 0
+              const width = count ? Math.max(8, (count / panorama.maxCategory) * 100) : 0
+              return (
+                <button
+                  type="button"
+                  key={cat}
+                  className={`as-category-item ${category === cat ? 'is-active' : ''}`}
+                  onClick={() => setCategory(cat)}
+                  aria-pressed={category === cat}
+                >
+                  <span className="as-category-label"><strong>{cat}</strong><em>{count} 件</em></span>
+                  <span className="as-category-track"><i style={{ width: `${width}%` }} /></span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </section>
 
       <section className="as-kpi" aria-label="汇总">
         <div className="as-kpi-card">
@@ -142,7 +256,7 @@ export default function AllocatableSummary() {
                 const color = BAR_COLORS[i % BAR_COLORS.length]
                 return (
                   <div
-                    key={`${r.category}-${r.capacity_gb}-${r.ddr_gen}`}
+                    key={`${r.category}-${r.model_id ?? ''}-${r.capacity_gb ?? ''}-${r.ddr_gen ?? ''}`}
                     className="as-bar-col"
                     title={`${r.spec_label}：${count}`}
                   >
@@ -194,7 +308,7 @@ export default function AllocatableSummary() {
                   const share = chart.total ? (count / chart.total) * 100 : 0
                   const color = BAR_COLORS[i % BAR_COLORS.length]
                   return (
-                    <tr key={`${r.category}-${r.capacity_gb}-${r.ddr_gen}`}>
+                    <tr key={`${r.category}-${r.model_id ?? ''}-${r.capacity_gb ?? ''}-${r.ddr_gen ?? ''}`}>
                       <td className="as-col-cat">{r.category}</td>
                       <td className="as-col-spec">
                         <strong>{r.spec_label}</strong>

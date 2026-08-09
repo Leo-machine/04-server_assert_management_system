@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
@@ -202,6 +203,14 @@ class Supplier(Base):
 
 class Approval(Base):
     __tablename__ = "approval"
+    __table_args__ = (
+        Index(
+            "uq_approval_pending_part",
+            "part_id",
+            unique=True,
+            sqlite_where=text("overall_status = '审批中'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     part_id: Mapped[int] = mapped_column(ForeignKey("part.id"), nullable=False)

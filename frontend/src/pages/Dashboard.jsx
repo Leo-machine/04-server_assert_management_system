@@ -70,7 +70,7 @@ export default function Dashboard() {
       <p className="muted">配件资产实时状态一览，快速掌握库存、可调余量与待办事项。</p>
       {error && <div className="error">{error}</div>}
 
-      <h3 style={{ marginTop: '1.25rem', color: '#003e7e' }}>资产状态</h3>
+      <h3 className="section-title"><span>资产状态</span><small>ASSET STATUS</small></h3>
       <div className="stat-grid">
         {stats && [
           { label: '配件总数', value: stats.total, color: '#005a9c' },
@@ -93,7 +93,7 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <h3 style={{ marginTop: '1.5rem', color: '#003e7e' }}>可调余量</h3>
+      <h3 className="section-title"><span>可调余量</span><small>ALLOCATABLE INVENTORY</small></h3>
       <p className="muted">
         口径与接口一致：在库 ∩ {HOME_OWNER_UNIT} ∩ 通用可调。
         按规格细分见「可调余量」页（当前支持内存）。
@@ -140,7 +140,7 @@ export default function Dashboard() {
 
       {stats && Object.keys(stats.byCategory).length > 0 && (
         <>
-          <h3 style={{ marginTop: '1.5rem', color: '#003e7e' }}>在库配件分类明细</h3>
+          <h3 className="section-title"><span>在库配件分类明细</span><small>CATEGORY BREAKDOWN</small></h3>
           <div className="cat-breakdown">
             <table>
               <thead>
@@ -169,7 +169,7 @@ export default function Dashboard() {
         </>
       )}
 
-      <h3 style={{ marginTop: '1.5rem', color: '#003e7e' }}>快捷操作</h3>
+      <h3 className="section-title"><span>快捷操作</span><small>QUICK ACTIONS</small></h3>
       <div className="quick-actions">
         <button type="button" className="action-card" onClick={() => nav('/inbound')}>
           <span className="action-icon">📥</span>

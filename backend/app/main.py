@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .database import DB_PATH, Base, SessionLocal, engine
 from .migrate_brands import migrate_brands
+from .migrate_approval_uniqueness import migrate_approval_uniqueness
 from .migrate_demo03 import migrate_demo03
 from .migrate_part_models import migrate_legacy_part_models
 from .migrate_server_info import migrate_server_info
@@ -44,6 +45,7 @@ async def lifespan(app: FastAPI):
         migrate_wave1(db)
         migrate_server_info(db)
         migrate_user_status(db)
+        migrate_approval_uniqueness(db)
         # 数据级迁移与 seed
         migrate_demo03(db)
         migrate_brands(db)

@@ -87,7 +87,12 @@ export default function App() {
   const [user, setUser] = useState(() => getStoredUser())
   const nav = useNavigate()
   const [collapsed, setCollapsed] = useState({})
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const location = useLocation()
+
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [location.pathname])
 
   // 启动/聚焦时刷新角色（以服务端为准）
   useEffect(() => {
@@ -161,11 +166,20 @@ export default function App() {
   })
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className={`app-shell ${mobileNavOpen ? 'nav-open' : ''}`}>
+      <button
+        type="button"
+        className="sidebar-scrim"
+        aria-label="关闭导航"
+        onClick={() => setMobileNavOpen(false)}
+      />
+      <aside className="sidebar" aria-label="主导航">
         <div className="sidebar-brand">
-          <img src="/logo.webp" alt="Logo" className="brand-logo" />
-          <span className="brand-text">配件资产管理</span>
+          <span className="brand-mark"><img src="/logo.webp" alt="" className="brand-logo" /></span>
+          <span className="brand-copy">
+            <strong>配件资产管理</strong>
+            <small>ASSET OPERATIONS</small>
+          </span>
         </div>
 
         <nav className="sidebar-nav">
@@ -204,6 +218,16 @@ export default function App() {
       <div className="app-main">
         <header className="topbar">
           <div className="topbar-left">
+            <button
+              type="button"
+              className="mobile-menu-btn"
+              aria-label="打开导航"
+              onClick={() => setMobileNavOpen(true)}
+            >
+              <span />
+              <span />
+              <span />
+            </button>
             <span className="topbar-title">服务器配件资产管理系统</span>
             {currentItem && (
               <>
@@ -213,9 +237,8 @@ export default function App() {
             )}
           </div>
           <div className="topbar-right">
-            <span className="topbar-user">
-              {user.name}（{user.role}）
-            </span>
+            <span className="topbar-avatar">{(user.name || '?').slice(0, 1)}</span>
+            <span className="topbar-user"><strong>{user.name}</strong><small>{user.role}</small></span>
             <button type="button" className="topbar-logout" onClick={handleLogout}>
               退出
             </button>

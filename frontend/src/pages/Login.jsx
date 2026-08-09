@@ -48,10 +48,24 @@ export default function Login() {
 
   return (
     <div className="login-page">
+      <div className="login-showcase">
+        <div className="login-showcase-brand">
+          <span className="login-showcase-mark"><img src="/logo.webp" alt="" /></span>
+          <span>数字化资产运营平台</span>
+        </div>
+        <div className="login-showcase-content">
+          <p className="login-eyebrow">ASSET OPERATIONS</p>
+          <h2>让每一件配件<br />都可查、可控、可追溯</h2>
+          <p>一体化管理入库、装机、调拨、审批与盘点，统一资产口径，提升运维效率。</p>
+        </div>
+        <div className="login-showcase-foot">资产全生命周期管理 · 履历全程留痕</div>
+      </div>
+      <div className="login-card-wrap">
       <div className="login-card">
         <div className="login-brand">
           <img src="/logo.webp" alt="Logo" className="login-logo" />
           <h1>服务器配件资产管理系统</h1>
+          <p>欢迎回来，请登录您的账号</p>
         </div>
         <form onSubmit={onSubmit}>
           {error && <div className="error">{error}</div>}
@@ -76,7 +90,7 @@ export default function Login() {
             />
           </label>
           <button type="submit" disabled={busy}>
-            {busy ? '登录中…' : '登 录'}
+            {busy ? '正在验证…' : '登录系统'}
           </button>
         </form>
         <p className="muted" style={{ textAlign: 'center' }}>
@@ -103,6 +117,7 @@ export default function Login() {
             ))}
           </ul>
         </div>
+      </div>
       </div>
     </div>
   )

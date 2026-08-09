@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from .. import enums
@@ -156,7 +157,14 @@ def _create_approval(
                 step_status=enums.STEP_PENDING,
             )
         )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        # 数据库部分唯一索引是并发场景下的最终防线。
+        if "uq_approval_pending_part" in str(exc) or "approval.part_id" in str(exc):
+            raise BusinessError("该配件已有「审批中」的申请单，禁止重复发起") from exc
+        raise
     db.refresh(approval)
     return get_approval(db, approval.id)
 

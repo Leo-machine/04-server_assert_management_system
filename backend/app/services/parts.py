@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
@@ -26,6 +28,17 @@ from .movement import (
     require_status,
 )
 from ..category_specs import CATEGORY_ASSET_PREFIX, validate_category
+
+
+def _require_location_category(loc: StorageLocation, part_or_model: Part | PartModel) -> None:
+    """校验库位的品类限制，供入库、拆下和归还共用。"""
+    model = part_or_model.model if isinstance(part_or_model, Part) else part_or_model
+    allowed = loc.allowed_categories or []
+    if allowed and model.category not in allowed:
+        raise BusinessError(
+            f"库位「{loc.warehouse}/{loc.slot}」仅允许："
+            f"{' / '.join(allowed)}，当前型号类型为「{model.category}」"
+        )
 
 
 def generate_next_fixed_asset_no(db: Session, category: str) -> str:
@@ -157,12 +170,7 @@ def inbound(
         loc = db.get(StorageLocation, storage_location_id)
         if loc is None:
             raise BusinessError("库位不存在")
-        allowed = loc.allowed_categories or []
-        if allowed and model.category not in allowed:
-            raise BusinessError(
-                f"库位「{loc.warehouse}/{loc.slot}」仅允许："
-                f"{' / '.join(allowed)}，当前型号类型为「{model.category}」"
-            )
+        _require_location_category(loc, model)
         missing = []
         for label, val in (
             ("运维部门", responsible_group),
@@ -197,49 +205,48 @@ def inbound(
         loc_kind = enums.LOC_STORAGE
         loc_id = storage_location_id
 
-    part = Part(
-        model_id=model_id,
-        fixed_asset_no=fixed_asset_no,
-        serial_no=serial_no,
-        source_type=source_type,
-        contract_no=contract_v,
-        purchase_amount=purchase_amount,
-        purchase_date=purchase_date_v,
-        responsible_group=group_v,
-        sensitivity=sensitivity or "无",
-        supplier=supplier_v,
-        project=project_v,
-        owner_unit=owner_v,
-        warranty_expiry=warranty_v,
-        allocatable_flag=allocatable_flag,
-        current_status=status_to,
-        current_loc_kind=loc_kind,
-        current_loc_id=loc_id,
-    )
-    db.add(part)
-    db.flush()
-
-    movement = insert_movement(
-        db,
-        part_id=part.id,
-        event_type=enums.EVENT_INBOUND,
-        status_from=None,
-        status_to=status_to,
-        operator_id=operator_id,
-        loc_from_kind=enums.LOC_NONE,
-        loc_from_id=None,
-        loc_to_kind=loc_kind,
-        loc_to_id=loc_id,
-        remark=remark,
-    )
-    apply_projection_from_movement(part, movement)
-    if source_type == enums.SOURCE_ORIGINAL:
-        db.add(PartServerLink(part_id=part.id, server_id=server_id, slot=None))
-
     MAX_RETRIES = 5 if auto_generated else 1
-    last_error = None
     for attempt in range(MAX_RETRIES):
         try:
+            # rollback 后 ORM 对象可能已脱离 Session；每次重试都完整重建
+            # 配件、入库履历与原装绑定，确保三者始终同一事务。
+            part = Part(
+                model_id=model_id,
+                fixed_asset_no=fixed_asset_no,
+                serial_no=serial_no,
+                source_type=source_type,
+                contract_no=contract_v,
+                purchase_amount=purchase_amount,
+                purchase_date=purchase_date_v,
+                responsible_group=group_v,
+                sensitivity=sensitivity or "无",
+                supplier=supplier_v,
+                project=project_v,
+                owner_unit=owner_v,
+                warranty_expiry=warranty_v,
+                allocatable_flag=allocatable_flag,
+                current_status=status_to,
+                current_loc_kind=loc_kind,
+                current_loc_id=loc_id,
+            )
+            db.add(part)
+            db.flush()
+            movement = insert_movement(
+                db,
+                part_id=part.id,
+                event_type=enums.EVENT_INBOUND,
+                status_from=None,
+                status_to=status_to,
+                operator_id=operator_id,
+                loc_from_kind=enums.LOC_NONE,
+                loc_from_id=None,
+                loc_to_kind=loc_kind,
+                loc_to_id=loc_id,
+                remark=remark,
+            )
+            apply_projection_from_movement(part, movement)
+            if source_type == enums.SOURCE_ORIGINAL:
+                db.add(PartServerLink(part_id=part.id, server_id=server_id, slot=None))
             if commit:
                 db.commit()
                 db.refresh(part)
@@ -251,15 +258,9 @@ def inbound(
             if not auto_generated or attempt >= MAX_RETRIES - 1:
                 raise handle_integrity_error(e, "固定资产编号可能已存在") from e
             # 自动生成冲突：递增序号重试
-            last_error = e
             import time
             time.sleep(0.05 * (attempt + 1))
             fixed_asset_no = generate_next_fixed_asset_no(db, model.category)
-            part.fixed_asset_no = fixed_asset_no
-            # re-associate with the current session after rollback
-            db.add(part)
-            if source_type == enums.SOURCE_ORIGINAL:
-                db.add(PartServerLink(part_id=part.id, server_id=server_id, slot=None))
 
     raise BusinessError("固定资产编号自动生成失败，已达最大重试次数，请稍后重试")
 
@@ -342,6 +343,7 @@ def uninstall(
     loc = db.get(StorageLocation, storage_location_id)
     if loc is None:
         raise BusinessError("目标库位不存在")
+    _require_location_category(loc, part)
 
     # damaged=True 即坏件拆下：在用 → 损坏（好件则回到在库）
     status_to = enums.STATUS_DAMAGED if damaged else enums.STATUS_IN_STOCK
@@ -418,6 +420,7 @@ def return_from_loan(
     loc = db.get(StorageLocation, storage_location_id)
     if loc is None:
         raise BusinessError("目标库位不存在")
+    _require_location_category(loc, part)
 
     from_kind = part.current_loc_kind
     from_id = part.current_loc_id
