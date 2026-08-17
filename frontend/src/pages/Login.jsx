@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api, getStoredUser, getToken, setStoredUser, setToken } from '../api'
 import { homePathFor } from '../lib/roles'
 
-export default function Login() {
+export default function Login({ onLogin }) {
   const nav = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -13,9 +13,10 @@ export default function Login() {
   useEffect(() => {
     const u = getStoredUser()
     if (u && getToken()) {
+      onLogin?.(u)
       nav(homePathFor(u), { replace: true })
     }
-  }, [nav])
+  }, [nav, onLogin])
 
   async function onSubmit(e) {
     e.preventDefault()
@@ -31,6 +32,7 @@ export default function Login() {
         role: data.role,
       }
       setStoredUser(user)
+      onLogin?.(user)
       nav(homePathFor(user), { replace: true })
     } catch (err) {
       setError(err.message)

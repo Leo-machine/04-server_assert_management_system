@@ -131,7 +131,7 @@ export default function App() {
   if (location.pathname === '/login' || location.pathname === '/register') {
     return (
       <Routes>
-        <Route path="/login" element={<Login />} />
+        <Route path="/login" element={<Login onLogin={setUser} />} />
         <Route path="/register" element={<Register />} />
       </Routes>
     )
@@ -158,6 +158,7 @@ export default function App() {
 
   function handleLogout() {
     clearToken()
+    setUser(null)
     nav('/login', { replace: true })
   }
 
@@ -274,7 +275,7 @@ export default function App() {
               <Route path="/servers/:id" element={<Navigate to="/devices" replace />} />
               <Route path="/locations" element={<Locations />} />
               <Route path="/allocatable" element={<AllocatableSummary />} />
-              <Route path="/login" element={<Login />} />
+              <Route path="/login" element={<Login onLogin={setUser} />} />
             </Routes>
           </AuthGuard>
         </main>
