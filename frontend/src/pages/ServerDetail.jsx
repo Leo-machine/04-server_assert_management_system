@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
+import Pagination from '../components/Pagination'
+import { usePagination } from '../hooks/usePagination'
 
 function Field({ label, children }) {
   return (
@@ -38,6 +40,7 @@ export default function ServerDetail() {
 
   const parts = server?.installed_parts || []
   const byCat = server?.installed_by_category || {}
+  const partsPagination = usePagination(parts)
 
   return (
     <div className="pd-page">
@@ -139,7 +142,7 @@ export default function ServerDetail() {
                   </tr>
                 </thead>
                 <tbody>
-                  {parts.map((p) => (
+                  {partsPagination.pageItems.map((p) => (
                     <tr key={p.id}>
                       <td>
                         <Link to={`/parts/${p.id}`}>{p.fixed_asset_no}</Link>
@@ -160,6 +163,7 @@ export default function ServerDetail() {
                 </tbody>
               </table>
             )}
+            <Pagination pagination={partsPagination} />
           </section>
         </>
       )}

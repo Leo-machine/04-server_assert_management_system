@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, getStoredUser } from '../api'
 import { OPS_ROLES, hasRole } from '../lib/roles'
+import Pagination from '../components/Pagination'
+import { usePagination } from '../hooks/usePagination'
 
 function locText(kind, id) {
   if (!kind) return '—'
@@ -18,6 +20,10 @@ export default function StocktakeDetail() {
   const [actualLocId, setActualLocId] = useState('')
   const [feedback, setFeedback] = useState('')
   const canManage = hasRole(getStoredUser(), OPS_ROLES)
+  const items = useMemo(() => st?.items || [], [st])
+  const discrepancies = useMemo(() => items.filter((item) => item.discrepancy), [items])
+  const itemsPagination = usePagination(items)
+  const discrepanciesPagination = usePagination(discrepancies)
 
   async function load() {
     const [detail, locations] = await Promise.all([
@@ -133,7 +139,7 @@ export default function StocktakeDetail() {
           </tr>
         </thead>
         <tbody>
-          {st.items.map((item) => (
+          {itemsPagination.pageItems.map((item) => (
             <tr key={item.id}>
               <td>{item.fixed_asset_no || item.scanned_asset_no || '—'}</td>
               <td>{locText(item.expected_loc_kind, item.expected_loc_id)}</td>
@@ -199,6 +205,7 @@ export default function StocktakeDetail() {
           ))}
         </tbody>
       </table>
+      <Pagination pagination={itemsPagination} />
 
       <h3>差异清单</h3>
       <table>
@@ -211,9 +218,7 @@ export default function StocktakeDetail() {
           </tr>
         </thead>
         <tbody>
-          {st.items
-            .filter((i) => i.discrepancy)
-            .map((i) => (
+          {discrepanciesPagination.pageItems.map((i) => (
               <tr key={i.discrepancy.id}>
                 <td>#{i.discrepancy.id}</td>
                 <td>#{i.id}</td>
@@ -227,6 +232,7 @@ export default function StocktakeDetail() {
             ))}
         </tbody>
       </table>
+      <Pagination pagination={discrepanciesPagination} />
 
       {inProgress && canManage && (
         <div style={{ marginTop: '1rem' }}>

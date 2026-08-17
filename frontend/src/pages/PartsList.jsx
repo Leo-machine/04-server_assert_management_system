@@ -9,6 +9,8 @@ import { filterByQuery } from '../lib/fuzzy'
 import { OPS_ROLES, hasRole, homePathFor } from '../lib/roles'
 import { PART_CATEGORIES } from '../lib/categories'
 import { locLabel } from '../lib/locLabel'
+import Pagination from '../components/Pagination'
+import { usePagination } from '../hooks/usePagination'
 
 const CATEGORY_ORDER = PART_CATEGORIES
 
@@ -63,8 +65,6 @@ export default function PartsList() {
   const [busyId, setBusyId] = useState(null)
   const [batchBusy, setBatchBusy] = useState(false)
   const [query, setQuery] = useState('')
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
   const [openFilter, setOpenFilter] = useState('') // status | alloc | loc | ''
   const [batchOp, setBatchOp] = useState(null) // install/loan/transfer/scrap/damage
   const [users, setUsers] = useState([])
@@ -188,18 +188,9 @@ export default function PartsList() {
     return map
   }, [searchedParts, filterStatus, filterAlloc, filterLocKind])
 
-  const visibleIds = useMemo(() => visible.map((p) => p.id), [visible])
+  const pagination = usePagination(visible)
+  const visibleIds = useMemo(() => pagination.pageItems.map((p) => p.id), [pagination.pageItems])
   const sel = useSelection(visibleIds)
-
-  const totalPages = Math.max(1, Math.ceil(visible.length / pageSize))
-  const safePage = Math.min(page, totalPages)
-  const paged = useMemo(
-    () => visible.slice((safePage - 1) * pageSize, safePage * pageSize),
-    [visible, safePage, pageSize],
-  )
-  useEffect(() => {
-    setPage(1)
-  }, [filterCat, filterStatus, filterAlloc, filterLocKind, query, pageSize])
 
   const populatedCats = useMemo(
     () => CATEGORY_ORDER.filter((c) => (categoryStats[c]?.total || 0) > 0),
@@ -497,7 +488,7 @@ export default function PartsList() {
             </tr>
           </thead>
           <tbody>
-            {paged.map((p) => {
+            {pagination.pageItems.map((p) => {
               const canToggleAlloc = p.current_status === '在库'
               const isGeneral = p.allocatable_flag === '通用可调'
               return (
@@ -603,7 +594,7 @@ export default function PartsList() {
                 </tr>
               )
             })}
-            {!paged.length && (
+            {!pagination.pageItems.length && (
               <tr>
                 <td colSpan={7} className="pl-empty">当前筛选下暂无配件</td>
               </tr>
@@ -612,59 +603,7 @@ export default function PartsList() {
         </table>
       </div>
 
-      <div className="pl-pager">
-        <span className="muted">
-          共 {visible.length} 条 · 第 {safePage}/{totalPages} 页
-        </span>
-        <div className="pl-pager-btns">
-          <button
-            type="button"
-            className="secondary"
-            disabled={safePage <= 1}
-            onClick={() => setPage(safePage - 1)}
-          >
-            上一页
-          </button>
-          {Array.from({ length: totalPages }, (_, i) => i + 1)
-            .filter((n) => n === 1 || n === totalPages || Math.abs(n - safePage) <= 2)
-            .reduce((acc, n, i, arr) => {
-              if (i > 0 && n - arr[i - 1] > 1) acc.push('…')
-              acc.push(n)
-              return acc
-            }, [])
-            .map((n, i) =>
-              n === '…' ? (
-                <span key={`gap-${i}`} className="muted">…</span>
-              ) : (
-                <button
-                  key={n}
-                  type="button"
-                  className={n === safePage ? '' : 'secondary'}
-                  onClick={() => setPage(n)}
-                >
-                  {n}
-                </button>
-              ),
-            )}
-          <button
-            type="button"
-            className="secondary"
-            disabled={safePage >= totalPages}
-            onClick={() => setPage(safePage + 1)}
-          >
-            下一页
-          </button>
-        </div>
-        <select
-          value={pageSize}
-          onChange={(e) => setPageSize(Number(e.target.value))}
-          aria-label="每页条数"
-        >
-          <option value={10}>10 条/页</option>
-          <option value={20}>20 条/页</option>
-          <option value={50}>50 条/页</option>
-        </select>
-      </div>
+      <Pagination pagination={pagination} />
 
       {batchOp && (
         <BatchOpModal

@@ -8,6 +8,8 @@ import ListToolbar from '../components/ListToolbar'
 import ImportWizard from '../components/ImportWizard'
 import { useSelection } from '../hooks/useSelection'
 import { filterByQuery } from '../lib/fuzzy'
+import Pagination from '../components/Pagination'
+import { usePagination } from '../hooks/usePagination'
 
 const EMPTY_FORM = {
   asset_no: '', model: '', serial_no: '', location_id: '',
@@ -297,7 +299,8 @@ export default function Servers() {
     [searched, filterModel, filterLocation, filterGroup],
   )
 
-  const visibleIds = useMemo(() => visible.map((s) => s.id), [visible])
+  const pagination = usePagination(visible)
+  const visibleIds = useMemo(() => pagination.pageItems.map((s) => s.id), [pagination.pageItems])
   const sel = useSelection(visibleIds)
 
   const hasColFilters = !!(
@@ -626,7 +629,7 @@ export default function Servers() {
             </tr>
           </thead>
           <tbody>
-            {visible.map((s) => (
+            {pagination.pageItems.map((s) => (
               <tr key={s.id} className={sel.isSelected(s.id) ? 'is-selected' : ''}
                 style={{ cursor: 'pointer' }} onClick={() => nav(`/devices/${s.id}`)}>
                 <td className="lt-check-col" onClick={(e) => e.stopPropagation()}>
@@ -668,6 +671,7 @@ export default function Servers() {
           </tbody>
         </table>
       </div>
+      <Pagination pagination={pagination} />
 
       {/* 工单号输入弹窗 */}
       {woPrompt && (

@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, getStoredUser } from '../api'
 import { isLeader } from '../lib/roles'
 import { ALL_MANAGED_CATEGORIES } from '../lib/categories'
+import ListToolbar from '../components/ListToolbar'
+import Pagination from '../components/Pagination'
+import { usePagination } from '../hooks/usePagination'
+import { filterByQuery } from '../lib/fuzzy'
 
 const LOCATION_TYPES = ['库房货架', '机房备件柜', '数据中心机柜', '其他']
 
@@ -26,6 +30,7 @@ export default function Locations() {
   const [editingId, setEditingId] = useState(null)
   const [error, setError] = useState('')
   const [ok, setOk] = useState('')
+  const [query, setQuery] = useState('')
   const isAdmin = isLeader(getStoredUser())
 
   async function load() {
@@ -45,6 +50,10 @@ export default function Locations() {
     () => Math.max(1, ...distribution.map((d) => d.part_count)),
     [distribution],
   )
+  const visibleLocations = useMemo(() => filterByQuery(locations, query, (loc) => [
+    loc.warehouse, loc.slot, loc.location_type, ...(loc.allowed_categories || []),
+  ]), [locations, query])
+  const pagination = usePagination(visibleLocations)
 
   function resetForm() {
     setEditingId(null)
@@ -238,6 +247,12 @@ export default function Locations() {
 
         <div>
           <h3 style={{ marginTop: 0 }}>位置列表（{locations.length}）</h3>
+          <ListToolbar
+            query={query}
+            onQueryChange={setQuery}
+            placeholder="搜索区域 / 位置 / 类型 / 允许配件…"
+            resultText={<> 显示 <strong>{visibleLocations.length}</strong> / {locations.length}</>}
+          />
           <table>
             <thead>
               <tr>
@@ -250,7 +265,7 @@ export default function Locations() {
               </tr>
             </thead>
             <tbody>
-              {locations.map((loc) => (
+              {pagination.pageItems.map((loc) => (
                 <tr key={loc.id}>
                   <td><strong>{loc.warehouse}</strong></td>
                   <td>{loc.slot}</td>
@@ -284,6 +299,7 @@ export default function Locations() {
               ))}
             </tbody>
           </table>
+          <Pagination pagination={pagination} />
         </div>
       </div>
     </div>

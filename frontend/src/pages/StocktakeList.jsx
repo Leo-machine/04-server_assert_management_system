@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { api, getStoredUser } from '../api'
 import ListToolbar from '../components/ListToolbar'
 import { filterByQuery } from '../lib/fuzzy'
+import Pagination from '../components/Pagination'
+import { usePagination } from '../hooks/usePagination'
 
 import { OPS_ROLES, hasRole } from '../lib/roles'
 
@@ -32,6 +34,7 @@ export default function StocktakeList() {
       ]),
     [list, query],
   )
+  const pagination = usePagination(visible)
 
   async function createFull() {
     setError('')
@@ -83,7 +86,7 @@ export default function StocktakeList() {
           </tr>
         </thead>
         <tbody>
-          {visible.map((s) => (
+          {pagination.pageItems.map((s) => (
             <tr key={s.id}>
               <td>#{s.id}</td>
               <td>{s.scope_kind}</td>
@@ -95,6 +98,7 @@ export default function StocktakeList() {
           ))}
         </tbody>
       </table>
+      <Pagination pagination={pagination} />
       {!visible.length && (
         <p className="muted">{list.length ? '无匹配盘点单' : '暂无盘点单'}</p>
       )}

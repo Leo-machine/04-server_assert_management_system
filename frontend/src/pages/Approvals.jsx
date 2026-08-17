@@ -3,6 +3,8 @@ import { api, getOperatorId, getStoredUser } from '../api'
 import { isLeader as userIsLeader } from '../lib/roles'
 import ListToolbar from '../components/ListToolbar'
 import { filterByQuery } from '../lib/fuzzy'
+import Pagination from '../components/Pagination'
+import { usePagination } from '../hooks/usePagination'
 
 function statusClass(s) {
   if (s === '审批中') return 'ap-status-pending'
@@ -71,6 +73,8 @@ export default function Approvals() {
       ...(a.steps || []).flatMap((s) => [s.approver?.name, s.step_status, s.opinion]),
     ]),
   [list, query])
+  const businessPagination = usePagination(visible)
+  const registrationPagination = usePagination(regs)
 
   async function decide(approval, approve) {
     let opinion = approve ? '同意' : ''
@@ -134,7 +138,7 @@ export default function Approvals() {
             </tr>
           </thead>
           <tbody>
-            {regs.map((u) => (
+            {registrationPagination.pageItems.map((u) => (
               <tr key={u.id}>
                 <td>{u.name}</td>
                 <td>{u.username}</td>
@@ -154,13 +158,14 @@ export default function Approvals() {
           </tbody>
         </table>
       )}
+      {tab === 'reg' && isLeader && <Pagination pagination={registrationPagination} />}
 
       {tab === 'biz' && <ListToolbar query={query} onQueryChange={setQuery}
         placeholder="搜索单号 / 类型 / 状态 / 申请人…"
         resultText={<span>共 <strong>{list.length}</strong> 单，显示 <strong>{visible.length}</strong></span>}
       />}
 
-      {tab === 'biz' && visible.map((a) => {
+      {tab === 'biz' && businessPagination.pageItems.map((a) => {
         const currentStep = a.steps.find((s) => s.level === a.current_level)
         const canDecide = a.overall_status === '审批中' && currentStep?.approver_id === operatorId
         const canWithdraw = a.overall_status === '审批中' && a.applicant_id === operatorId
@@ -216,6 +221,7 @@ export default function Approvals() {
         )
       })}
       {tab === 'biz' && !visible.length && <p className="muted">{list.length ? '无匹配审批单' : '暂无审批单'}</p>}
+      {tab === 'biz' && <Pagination pagination={businessPagination} />}
     </div>
   )
 }

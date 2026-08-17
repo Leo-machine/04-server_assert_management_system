@@ -6,6 +6,8 @@ import SpecFields, { formatSpec } from '../components/SpecFields'
 import { useSelection } from '../hooks/useSelection'
 import { filterByQuery } from '../lib/fuzzy'
 import { assetScopeLabel, level2Categories } from '../lib/assetScopes'
+import Pagination from '../components/Pagination'
+import { usePagination } from '../hooks/usePagination'
 
 /** 按类别从品牌+规格自动拼接型号名称 */
 const NAME_TEMPLATES = {
@@ -102,7 +104,8 @@ export default function PartModels() {
     ])
   }, [models, filterCat, query, scopeFilter, domainFilter, domainScopes])
 
-  const visibleIds = useMemo(() => visible.map((m) => m.id), [visible])
+  const pagination = usePagination(visible)
+  const visibleIds = useMemo(() => pagination.pageItems.map((m) => m.id), [pagination.pageItems])
   const sel = useSelection(visibleIds)
 
   const categoryBrands = useMemo(() => {
@@ -465,7 +468,7 @@ export default function PartModels() {
               </tr>
             </thead>
             <tbody>
-              {visible.map((m) => (
+              {pagination.pageItems.map((m) => (
                 <tr key={m.id} className={sel.isSelected(m.id) ? 'is-selected' : ''}>
                   <td className="lt-check-col">
                     <input
@@ -507,6 +510,7 @@ export default function PartModels() {
               ))}
             </tbody>
           </table>
+          <Pagination pagination={pagination} />
           {!visible.length && <p className="muted">暂无型号，请在左侧新增或调整搜索。</p>}
         </div>
       </div>

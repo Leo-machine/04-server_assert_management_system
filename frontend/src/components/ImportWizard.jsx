@@ -1,5 +1,9 @@
 import { useRef, useState } from 'react'
 import { api, downloadCsv } from '../api'
+import Pagination from './Pagination'
+import { usePagination } from '../hooks/usePagination'
+
+const EMPTY_ROWS = []
 
 // 通用两段式批量导入向导：下载模板/导出 → 上传 CSV → 表格化校验预览 → 确认导入
 // props:
@@ -16,6 +20,7 @@ export default function ImportWizard({ templateUrl, exportUrl, importUrl, previe
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const previewPagination = usePagination(report?.rows || EMPTY_ROWS)
 
   function download(url, fallbackName) {
     downloadCsv(url, fallbackName).catch((e) => setError(e.message))
@@ -133,7 +138,7 @@ export default function ImportWizard({ templateUrl, exportUrl, importUrl, previe
               </tr>
             </thead>
             <tbody>
-              {report.rows.map((r) => (
+              {previewPagination.pageItems.map((r) => (
                 <tr key={r.line} className={r.ok ? '' : 'is-invalid'}>
                   <td>{r.line}</td>
                   {previewCols.map((c) => (
@@ -161,6 +166,7 @@ export default function ImportWizard({ templateUrl, exportUrl, importUrl, previe
               ))}
             </tbody>
           </table>
+          <Pagination pagination={previewPagination} />
           <div className="row-actions" style={{ marginTop: '0.5rem' }}>
             <button
               type="button"

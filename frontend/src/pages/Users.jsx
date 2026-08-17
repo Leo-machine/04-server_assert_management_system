@@ -1,5 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api, getStoredUser } from '../api'
+import ListToolbar from '../components/ListToolbar'
+import Pagination from '../components/Pagination'
+import { usePagination } from '../hooks/usePagination'
+import { filterByQuery } from '../lib/fuzzy'
 
 const ROLE_DESC = {
   领导: '全部权限（含审批、基础数据、用户管理）',
@@ -19,6 +23,7 @@ export default function Users() {
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [query, setQuery] = useState('')
 
   function load() {
     return api.get('/auth/users').then(setUsers).catch((e) => setError(e.message))
@@ -70,6 +75,11 @@ export default function Users() {
     patchUser(u, { status: next }, `${u.name} 已${next}`)
   }
 
+  const visibleUsers = useMemo(() => filterByQuery(users, query, (user) => [
+    user.name, user.username, user.role, user.status, user.applied_role,
+  ]), [query, users])
+  const pagination = usePagination(visibleUsers)
+
   return (
     <div className="panel">
       <h2>用户管理</h2>
@@ -113,6 +123,13 @@ export default function Users() {
         </form>
       )}
 
+      <ListToolbar
+        query={query}
+        onQueryChange={setQuery}
+        placeholder="搜索姓名 / 用户名 / 角色 / 状态…"
+        resultText={<> 显示 <strong>{visibleUsers.length}</strong> / {users.length}</>}
+      />
+
       <table>
         <thead>
           <tr>
@@ -125,7 +142,7 @@ export default function Users() {
           </tr>
         </thead>
         <tbody>
-          {users.map((u) => {
+          {pagination.pageItems.map((u) => {
             const isSelf = u.id === me?.user_id
             return (
               <tr key={u.id}>
@@ -164,6 +181,7 @@ export default function Users() {
           })}
         </tbody>
       </table>
+      <Pagination pagination={pagination} />
     </div>
   )
 }

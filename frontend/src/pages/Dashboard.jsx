@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { api, getStoredUser } from '../api'
 import { homePathFor, isSupplier } from '../lib/roles'
+import Pagination from '../components/Pagination'
+import { usePagination } from '../hooks/usePagination'
 
 const HOME_OWNER_UNIT = '本单位信息中心'
 
@@ -11,6 +13,10 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null)
   const [error, setError] = useState('')
   const supplier = isSupplier(me)
+  const categoryRows = useMemo(() => Object.entries(stats?.byCategory || {})
+    .filter(([, count]) => count.total > 0)
+    .sort((a, b) => b[1].total - a[1].total), [stats])
+  const categoryPagination = usePagination(categoryRows, 5)
 
   useEffect(() => {
     if (supplier) return undefined
@@ -138,7 +144,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {stats && Object.keys(stats.byCategory).length > 0 && (
+      {categoryRows.length > 0 && (
         <>
           <h3 className="section-title"><span>在库配件分类明细</span><small>CATEGORY BREAKDOWN</small></h3>
           <div className="cat-breakdown">
@@ -152,10 +158,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(stats.byCategory)
-                  .filter(([, c]) => c.total > 0)
-                  .sort((a, b) => b[1].total - a[1].total)
-                  .map(([cat, c]) => (
+                {categoryPagination.pageItems.map(([cat, c]) => (
                     <tr key={cat}>
                       <td><strong>{cat}</strong></td>
                       <td><span className="badge">{c.total}</span></td>
@@ -166,6 +169,7 @@ export default function Dashboard() {
               </tbody>
             </table>
           </div>
+          <Pagination pagination={categoryPagination} pageSizeOptions={[5, 10, 20]} />
         </>
       )}
 

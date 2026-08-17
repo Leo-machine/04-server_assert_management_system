@@ -45,7 +45,7 @@ export function useSelection(visibleIds) {
   return {
     selected,
     selectedVisible,
-    selectedCount: selectedVisible.length,
+    selectedCount: selected.size,
     allVisibleSelected,
     someVisibleSelected,
     toggle,

@@ -5,6 +5,8 @@ import ListToolbar from '../components/ListToolbar'
 import { filterByQuery } from '../lib/fuzzy'
 import { OPS_ROLES, hasRole, homePathFor } from '../lib/roles'
 import { PART_CATEGORIES } from '../lib/categories'
+import Pagination from '../components/Pagination'
+import { usePagination } from '../hooks/usePagination'
 
 const BAR_COLORS = ['#005a9c', '#0f766e', '#0369a1', '#1d4ed8', '#0a7ea4', '#0284c7']
 
@@ -68,6 +70,7 @@ export default function AllocatableSummary() {
     const total = sorted.reduce((s, r) => s + (r.allocatable_count || 0), 0)
     return { sorted, max, total, specs: sorted.length }
   }, [visible])
+  const pagination = usePagination(visible)
 
   const panorama = useMemo(() => {
     const statuses = {}
@@ -303,7 +306,7 @@ export default function AllocatableSummary() {
                     </td>
                   </tr>
                 )}
-                {visible.map((r, i) => {
+                {pagination.pageItems.map((r, i) => {
                   const count = r.allocatable_count || 0
                   const share = chart.total ? (count / chart.total) * 100 : 0
                   const color = BAR_COLORS[i % BAR_COLORS.length]
@@ -332,6 +335,7 @@ export default function AllocatableSummary() {
               </tbody>
             </table>
           </div>
+          <Pagination pagination={pagination} />
         </section>
       </div>
     </div>

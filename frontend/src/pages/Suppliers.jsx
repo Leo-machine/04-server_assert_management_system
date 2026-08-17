@@ -5,6 +5,8 @@ import { useSelection } from '../hooks/useSelection'
 import { filterByQuery } from '../lib/fuzzy'
 import AssetScopePicker from '../components/AssetScopePicker'
 import { assetScopeLabel, level2Categories } from '../lib/assetScopes'
+import Pagination from '../components/Pagination'
+import { usePagination } from '../hooks/usePagination'
 
 const emptyForm = { name: '', contact: '', contact_info: '', remark: '', asset_category_ids: [] }
 
@@ -39,7 +41,8 @@ export default function Suppliers() {
       ]),
     [list, query, scopeFilter],
   )
-  const visibleIds = useMemo(() => visible.map((s) => s.id), [visible])
+  const pagination = usePagination(visible)
+  const visibleIds = useMemo(() => pagination.pageItems.map((s) => s.id), [pagination.pageItems])
   const sel = useSelection(visibleIds)
 
   function resetForm() {
@@ -239,7 +242,7 @@ export default function Suppliers() {
               </tr>
             </thead>
             <tbody>
-              {visible.map((s) => (
+              {pagination.pageItems.map((s) => (
                 <tr key={s.id} className={sel.isSelected(s.id) ? 'is-selected' : ''}>
                   <td className="lt-check-col">
                     <input
@@ -270,6 +273,7 @@ export default function Suppliers() {
               ))}
             </tbody>
           </table>
+          <Pagination pagination={pagination} />
           {!visible.length && (
             <p className="muted">{list.length ? '无匹配供应商' : '暂无供应商，请在左侧新增。'}</p>
           )}
