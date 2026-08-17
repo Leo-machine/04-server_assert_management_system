@@ -40,7 +40,8 @@ def create_brand(
     _require_admin(current_user)
     try:
         return brands_service.create_brand(
-            db, name=body.name, categories=body.categories
+            db, name=body.name, categories=body.categories,
+            asset_category_ids=body.asset_category_ids,
         )
     except BusinessError as e:
         raise HTTPException(status_code=400, detail=e.message) from e
@@ -62,6 +63,8 @@ def update_brand(
             name=payload.get("name"),
             categories=payload.get("categories"),
             set_categories="categories" in payload,
+            asset_category_ids=payload.get("asset_category_ids"),
+            set_asset_category_ids="asset_category_ids" in payload,
         )
     except BusinessError as e:
         raise HTTPException(status_code=400, detail=e.message) from e

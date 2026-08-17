@@ -53,6 +53,8 @@ def update_supplier(
             set_contact="contact" in payload,
             set_contact_info="contact_info" in payload,
             set_remark="remark" in payload,
+            asset_category_ids=payload.get("asset_category_ids"),
+            set_asset_category_ids="asset_category_ids" in payload,
         )
     except BusinessError as e:
         raise HTTPException(status_code=400, detail=e.message) from e

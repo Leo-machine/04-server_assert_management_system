@@ -64,6 +64,9 @@ export default function Inbound() {
   const [locs, setLocs] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [servers, setServers] = useState([])
+  const [assetTree, setAssetTree] = useState([])
+  const [level1Id, setLevel1Id] = useState('')
+  const [level2Id, setLevel2Id] = useState('')
   const [form, setForm] = useState(emptyCommon)
   const [error, setError] = useState('')
   const [ok, setOk] = useState('')
@@ -98,13 +101,15 @@ export default function Inbound() {
       api.get(locUrl),
       api.get('/suppliers'),
       api.get('/servers'),
+      api.get('/asset-categories?tree=true'),
     ])
-      .then(([cats, ms, ls, sps, srvs]) => {
+      .then(([cats, ms, ls, sps, srvs, tree]) => {
         setSchemas(cats)
         setModels(ms)
         setLocs(ls)
         setSuppliers(sps)
         setServers(srvs)
+        setAssetTree(tree)
         const firstLocId = ls[0]?.id ? String(ls[0].id) : ''
         setForm((f) => ({
           ...f,
@@ -113,6 +118,42 @@ export default function Inbound() {
       })
       .catch((e) => setError(e.message))
   }, [category])
+
+  useEffect(() => {
+    if (!assetTree.length) return
+    setLevel1Id((current) => current || String(assetTree.find((node) => node.enabled)?.id || ''))
+  }, [assetTree])
+
+  const selectedLevel1 = useMemo(
+    () => assetTree.find((node) => String(node.id) === level1Id),
+    [assetTree, level1Id],
+  )
+  const level2Options = useMemo(
+    () => (selectedLevel1?.children || []).filter((node) => node.enabled),
+    [selectedLevel1],
+  )
+  const selectedLevel2 = useMemo(
+    () => level2Options.find((node) => String(node.id) === level2Id),
+    [level2Options, level2Id],
+  )
+  const level3Options = useMemo(
+    () => (selectedLevel2?.children || []).filter((node) => node.enabled),
+    [selectedLevel2],
+  )
+  const scopedSuppliers = useMemo(() => suppliers.filter((supplier) => {
+    const scopes = supplier.asset_category_ids || []
+    return !scopes.length || (selectedLevel2 && scopes.includes(selectedLevel2.id))
+  }), [suppliers, selectedLevel2])
+
+  useEffect(() => {
+    if (!level2Options.length) {
+      setLevel2Id('')
+      return
+    }
+    if (!level2Options.some((node) => String(node.id) === level2Id)) {
+      setLevel2Id(String(level2Options[0].id))
+    }
+  }, [level2Options, level2Id])
 
   function fetchNextAssetNo(cat) {
     if (!cat) return
@@ -182,7 +223,7 @@ export default function Inbound() {
       <div className="panel">
         <h2>分类入库</h2>
         <p className="muted">
-          请选择配件类型进入对应入库表单。不同类型规格字段不同，保证入库数据可用、可检索。
+          请按专业域、资产大类和具体类别逐级选择。已接入的三级类别可进入入库表单，其余类别将随系统建设逐步开放。
           型号不足时请先联系领导在「型号管理」中维护
           {isAdmin && (
             <>（<Link to="/part-models">打开型号管理</Link>）</>
@@ -190,25 +231,46 @@ export default function Inbound() {
           。
         </p>
         {error && <div className="error">{error}</div>}
-        <div className="category-grid">
-          {(schemas.length ? schemas.map((s) => s.category).filter((c) => c !== '服务器') : Object.keys(CATEGORY_META)).map(
-            (cat) => {
-              const meta = CATEGORY_META[cat] || { desc: cat, tone: 'c1' }
-              const count = models.filter((m) => m.category === cat).length
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  className={`category-card ${meta.tone}`}
-                  onClick={() => chooseCategory(cat)}
-                >
-                  <strong>{cat}</strong>
-                  <span>{meta.desc}</span>
-                  <em>{count} 个可用型号</em>
+        <div className="inb-category-path">
+          <section className="inb-level-column">
+            <div className="inb-level-head"><span>01</span><strong>专业域</strong></div>
+            <div className="inb-level-options">
+              {assetTree.filter((node) => node.enabled).map((node) => (
+                <button key={node.id} type="button" className={level1Id === String(node.id) ? 'is-active' : ''} onClick={() => setLevel1Id(String(node.id))}>
+                  <strong>{node.name}</strong><small>{node.children?.length || 0} 个下级</small>
                 </button>
-              )
-            },
-          )}
+              ))}
+            </div>
+          </section>
+          <section className="inb-level-column">
+            <div className="inb-level-head"><span>02</span><strong>资产大类</strong></div>
+            <div className="inb-level-options">
+              {!level2Options.length && <div className="inb-level-empty">该专业域暂无下级目录</div>}
+              {level2Options.map((node) => (
+                <button key={node.id} type="button" className={level2Id === String(node.id) ? 'is-active' : ''} onClick={() => setLevel2Id(String(node.id))}>
+                  <strong>{node.name}</strong><small>{node.children?.length || 0} 个具体类别</small>
+                </button>
+              ))}
+            </div>
+          </section>
+          <section className="inb-level-column is-leaf">
+            <div className="inb-level-head"><span>03</span><strong>具体类别</strong></div>
+            <div className="inb-leaf-grid">
+              {!level3Options.length && <div className="inb-level-empty">目录已建立，具体类别待扩展</div>}
+              {level3Options.map((node) => {
+                const cat = node.business_category
+                const meta = CATEGORY_META[cat] || { desc: '业务能力待接入', tone: 'c1' }
+                const count = cat ? models.filter((m) => m.category === cat).length : 0
+                return (
+                  <button key={node.id} type="button" disabled={!cat} className={`inb-leaf-card ${cat ? 'is-ready' : ''}`} onClick={() => cat && chooseCategory(cat)}>
+                    <strong>{node.name}</strong>
+                    <span>{meta.desc}</span>
+                    <em>{cat ? `${count} 个可用型号` : '待扩展'}</em>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
         </div>
       </div>
     )
@@ -362,7 +424,7 @@ export default function Inbound() {
                 供应商 *
                 <select value={form.supplier} onChange={set('supplier')} required>
                   <option value="">— 请选择 —</option>
-                  {suppliers.map((s) => (
+                  {scopedSuppliers.map((s) => (
                     <option key={s.id} value={s.name}>{s.name}</option>
                   ))}
                 </select>

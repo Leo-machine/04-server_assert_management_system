@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from ..category_specs import ALL_MANAGED_CATEGORIES
 from ..models import Brand, PartModel
 from .movement import BusinessError
+from .asset_categories import normalize_level2_ids
 
 
 def _normalize_categories(categories: Optional[list[str]]) -> Optional[list[str]]:
@@ -60,6 +61,7 @@ def create_brand(
     *,
     name: str,
     categories: Optional[list[str]] = None,
+    asset_category_ids: Optional[list[int]] = None,
 ) -> Brand:
     name = name.strip()
     if not name:
@@ -67,7 +69,11 @@ def create_brand(
     existing = db.scalars(select(Brand).where(Brand.name == name)).first()
     if existing is not None:
         raise BusinessError(f"品牌「{name}」已存在")
-    row = Brand(name=name, categories=_normalize_categories(categories))
+    row = Brand(
+        name=name,
+        categories=_normalize_categories(categories),
+        asset_category_ids=normalize_level2_ids(db, asset_category_ids),
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -81,6 +87,8 @@ def update_brand(
     name: Optional[str] = None,
     categories: Optional[list[str]] = None,
     set_categories: bool = False,
+    asset_category_ids: Optional[list[int]] = None,
+    set_asset_category_ids: bool = False,
 ) -> Brand:
     row = db.get(Brand, brand_id)
     if row is None:
@@ -106,6 +114,8 @@ def update_brand(
 
     if set_categories:
         row.categories = _normalize_categories(categories)
+    if set_asset_category_ids:
+        row.asset_category_ids = normalize_level2_ids(db, asset_category_ids)
 
     db.commit()
     db.refresh(row)

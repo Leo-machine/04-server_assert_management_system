@@ -11,6 +11,7 @@ from ..category_specs import (
 from ..models import Part, PartModel
 from .memory_spec import sync_memory_aggregate_columns
 from .movement import BusinessError
+from .asset_categories import normalize_level2_id
 
 
 def _spec_or_raise(fn, *args, **kwargs):
@@ -50,6 +51,7 @@ def create_model(
     brand: Optional[str] = None,
     pn: Optional[str] = None,
     spec: Optional[dict] = None,
+    asset_category_id: Optional[int] = None,
 ) -> PartModel:
     _spec_or_raise(validate_category, category)
     name = (model_name or "").strip()
@@ -70,6 +72,7 @@ def create_model(
         brand=(brand or None),
         pn=(pn or None),
         spec=normalized,
+        asset_category_id=normalize_level2_id(db, asset_category_id),
     )
     sync_memory_aggregate_columns(row, normalized)
     db.add(row)
@@ -87,6 +90,7 @@ def update_model(
     brand: Optional[str] = None,
     pn: Optional[str] = None,
     spec: Optional[dict] = None,
+    asset_category_id: Optional[int] = None,
 ) -> PartModel:
     row = get_model(db, model_id)
     old_category = row.category
@@ -117,6 +121,8 @@ def update_model(
         row.brand = brand or None
     if pn is not None:
         row.pn = pn or None
+    if asset_category_id is not None:
+        row.asset_category_id = normalize_level2_id(db, asset_category_id)
 
     # 显式提交 spec，或类型变更时，才重规范化（避免误删未知键）
     if spec is not None or category_changed:

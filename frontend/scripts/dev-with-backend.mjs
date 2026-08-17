@@ -46,6 +46,12 @@ async function ensureBackend() {
 
 await ensureBackend()
 
-// 前端（保持前台，Ctrl+C 退出）
-const vite = spawn('npx', ['vite'], { cwd: frontendDir, stdio: 'inherit' })
-vite.on('exit', (code) => process.exit(code ?? 0))
+const VITE_LOG = '/tmp/vite_parts.log'
+const viteOut = openSync(VITE_LOG, 'a')
+const vite = spawn(
+  path.join(frontendDir, 'node_modules/.bin/vite'),
+  ['--host', '127.0.0.1', '--port', '5174'],
+  { cwd: frontendDir, detached: true, stdio: ['ignore', viteOut, viteOut] },
+)
+vite.unref()
+console.log('[dev] 前端已在后台启动 → http://127.0.0.1:5174/  日志: /tmp/vite_parts.log')

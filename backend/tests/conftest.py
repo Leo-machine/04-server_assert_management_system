@@ -6,6 +6,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
+from app.migrate_asset_categories import migrate_asset_categories
+from app.migrate_catalog_scopes import migrate_catalog_scopes
 from app.migrate_brands import migrate_brands
 from app.migrate_demo03 import migrate_demo03
 from app.migrate_part_models import migrate_legacy_part_models
@@ -34,6 +36,7 @@ def db_session():
     db = TestingSessionLocal()
     migrate_wave1(db)
     migrate_user_status(db)
+    migrate_asset_categories(db)
     migrate_demo03(db)
     migrate_brands(db)
     seed_if_empty(db)
@@ -41,6 +44,7 @@ def db_session():
     migrate_demo03(db)
     migrate_brands(db)
     migrate_suppliers(db)
+    migrate_catalog_scopes(db)
     try:
         yield db
     finally:

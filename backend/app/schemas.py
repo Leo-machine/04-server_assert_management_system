@@ -25,6 +25,7 @@ class PartModelOut(BaseModel):
     spec: Optional[dict] = None
     capacity_gb: Optional[int] = None
     ddr_gen: Optional[str] = None
+    asset_category_id: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -35,6 +36,7 @@ class PartModelIn(BaseModel):
     brand: Optional[str] = None
     pn: Optional[str] = None
     spec: Optional[dict] = None
+    asset_category_id: Optional[int] = None
 
 
 class PartModelUpdateIn(BaseModel):
@@ -43,6 +45,7 @@ class PartModelUpdateIn(BaseModel):
     brand: Optional[str] = None
     pn: Optional[str] = None
     spec: Optional[dict] = None
+    asset_category_id: Optional[int] = None
 
 
 class CategoryFieldOut(BaseModel):
@@ -59,6 +62,38 @@ class CategoryFieldOut(BaseModel):
 class CategorySchemaOut(BaseModel):
     category: str
     fields: list[CategoryFieldOut]
+
+
+class AssetCategoryOut(BaseModel):
+    id: int
+    name: str
+    code: Optional[str] = None
+    level: int
+    parent_id: Optional[int] = None
+    sort_order: int = 0
+    enabled: bool = True
+    business_category: Optional[str] = None
+    children: list["AssetCategoryOut"] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+class AssetCategoryIn(BaseModel):
+    name: str
+    code: Optional[str] = None
+    parent_id: Optional[int] = None
+    sort_order: int = 0
+    enabled: bool = True
+    business_category: Optional[str] = None
+
+
+class AssetCategoryUpdateIn(BaseModel):
+    name: str
+    code: Optional[str] = None
+    parent_id: Optional[int] = None
+    sort_order: int = 0
+    enabled: bool = True
+    business_category: Optional[str] = None
 
 
 class StorageLocationOut(BaseModel):
@@ -478,6 +513,7 @@ class BrandOut(BaseModel):
     id: int
     name: str
     categories: Optional[list[str]] = None
+    asset_category_ids: Optional[list[int]] = None
 
     model_config = {"from_attributes": True}
 
@@ -485,11 +521,13 @@ class BrandOut(BaseModel):
 class BrandIn(BaseModel):
     name: str
     categories: Optional[list[str]] = None
+    asset_category_ids: Optional[list[int]] = None
 
 
 class BrandUpdateIn(BaseModel):
     name: Optional[str] = None
     categories: Optional[list[str]] = None
+    asset_category_ids: Optional[list[int]] = None
 
 
 # ----- 供应商 -----
@@ -499,6 +537,7 @@ class SupplierOut(BaseModel):
     contact: Optional[str] = None
     contact_info: Optional[str] = None
     remark: Optional[str] = None
+    asset_category_ids: Optional[list[int]] = None
 
     model_config = {"from_attributes": True}
 
@@ -508,6 +547,7 @@ class SupplierIn(BaseModel):
     contact: Optional[str] = None
     contact_info: Optional[str] = None
     remark: Optional[str] = None
+    asset_category_ids: Optional[list[int]] = None
 
 
 class SupplierUpdateIn(BaseModel):
@@ -515,3 +555,4 @@ class SupplierUpdateIn(BaseModel):
     contact: Optional[str] = None
     contact_info: Optional[str] = None
     remark: Optional[str] = None
+    asset_category_ids: Optional[list[int]] = None

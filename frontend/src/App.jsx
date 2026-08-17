@@ -26,6 +26,7 @@ import StocktakeDetail from './pages/StocktakeDetail'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Users from './pages/Users'
+import AssetCategories from './pages/AssetCategories'
 import {
   ROLE_SUPPLIER,
   OPS_ROLES,
@@ -60,13 +61,14 @@ const ALL_NAV_GROUPS = [
       { to: '/inbound', label: '分类入库', icon: '📥', roles: INBOUND },
       { to: '/approvals', label: '审批中心', icon: '✅', roles: OPS },
       { to: '/stocktakes', label: '盘点管理', icon: '🔍', roles: OPS },
-      { to: '/servers', label: '服务器管理', icon: '🖥', roles: SERVER_NAV },
+      { to: '/devices', label: '设备管理', icon: '🖥', roles: SERVER_NAV },
     ],
   },
   {
     label: '基础数据',
     roles: MASTER,
     items: [
+      { to: '/asset-categories', label: '资产类别管理', icon: '◈' },
       { to: '/part-models', label: '型号管理', icon: '⚙' },
       { to: '/brands', label: '品牌管理', icon: '🏷' },
       { to: '/suppliers', label: '供应商管理', icon: '🏭' },
@@ -177,7 +179,7 @@ export default function App() {
         <div className="sidebar-brand">
           <span className="brand-mark"><img src="/logo.webp" alt="" className="brand-logo" /></span>
           <span className="brand-copy">
-            <strong>配件资产管理</strong>
+            <strong>电网资产运营</strong>
             <small>ASSET OPERATIONS</small>
           </span>
         </div>
@@ -228,7 +230,7 @@ export default function App() {
               <span />
               <span />
             </button>
-            <span className="topbar-title">服务器配件资产管理系统</span>
+            <span className="topbar-title">电网资产及其配件数字化运营系统</span>
             {currentItem && (
               <>
                 <span className="topbar-sep">/</span>
@@ -237,8 +239,6 @@ export default function App() {
             )}
           </div>
           <div className="topbar-right">
-            <span className="topbar-avatar">{(user.name || '?').slice(0, 1)}</span>
-            <span className="topbar-user"><strong>{user.name}</strong><small>{user.role}</small></span>
             <button type="button" className="topbar-logout" onClick={handleLogout}>
               退出
             </button>
@@ -252,6 +252,7 @@ export default function App() {
               <Route path="/" element={<PartsList />} />
               <Route path="/inbound" element={<Inbound />} />
               <Route path="/part-models" element={<PartModels />} />
+              <Route path="/asset-categories" element={<AssetCategories />} />
               <Route path="/brands" element={<Brands />} />
               <Route path="/users" element={<Users />} />
               <Route path="/suppliers" element={<Suppliers />} />
@@ -267,8 +268,10 @@ export default function App() {
               <Route path="/approvals" element={<Approvals />} />
               <Route path="/stocktakes" element={<StocktakeList />} />
               <Route path="/stocktakes/:id" element={<StocktakeDetail />} />
-              <Route path="/servers" element={<Servers />} />
-              <Route path="/servers/:id" element={<ServerDetail />} />
+              <Route path="/devices" element={<Servers />} />
+              <Route path="/devices/:id" element={<ServerDetail />} />
+              <Route path="/servers" element={<Navigate to="/devices" replace />} />
+              <Route path="/servers/:id" element={<Navigate to="/devices" replace />} />
               <Route path="/locations" element={<Locations />} />
               <Route path="/allocatable" element={<AllocatableSummary />} />
               <Route path="/login" element={<Login />} />

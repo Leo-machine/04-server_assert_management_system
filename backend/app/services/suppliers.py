@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Part, Supplier
 from .movement import BusinessError
+from .asset_categories import normalize_level2_ids
 
 
 def list_suppliers(db: Session) -> list[Supplier]:
@@ -25,6 +26,7 @@ def create_supplier(
     contact: Optional[str] = None,
     contact_info: Optional[str] = None,
     remark: Optional[str] = None,
+    asset_category_ids: Optional[list[int]] = None,
 ) -> Supplier:
     name = name.strip()
     if not name:
@@ -37,6 +39,7 @@ def create_supplier(
         contact=(contact or "").strip() or None,
         contact_info=(contact_info or "").strip() or None,
         remark=(remark or "").strip() or None,
+        asset_category_ids=normalize_level2_ids(db, asset_category_ids),
     )
     db.add(row)
     db.commit()
@@ -55,6 +58,8 @@ def update_supplier(
     set_contact: bool = False,
     set_contact_info: bool = False,
     set_remark: bool = False,
+    asset_category_ids: Optional[list[int]] = None,
+    set_asset_category_ids: bool = False,
 ) -> Supplier:
     row = db.get(Supplier, supplier_id)
     if row is None:
@@ -82,6 +87,8 @@ def update_supplier(
         row.contact_info = (contact_info or "").strip() or None
     if set_remark:
         row.remark = (remark or "").strip() or None
+    if set_asset_category_ids:
+        row.asset_category_ids = normalize_level2_ids(db, asset_category_ids)
 
     db.commit()
     db.refresh(row)

@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .database import DB_PATH, Base, SessionLocal, engine
 from .migrate_brands import migrate_brands
 from .migrate_approval_uniqueness import migrate_approval_uniqueness
+from .migrate_asset_categories import migrate_asset_categories
+from .migrate_catalog_scopes import migrate_catalog_scopes
 from .migrate_demo03 import migrate_demo03
 from .migrate_part_models import migrate_legacy_part_models
 from .migrate_server_info import migrate_server_info
@@ -15,6 +17,7 @@ from .migrate_suppliers import migrate_suppliers
 from .migrate_wave1 import migrate_wave1
 from .routers import (
     approvals,
+    asset_categories,
     auth,
     brands,
     catalog,
@@ -46,6 +49,8 @@ async def lifespan(app: FastAPI):
         migrate_server_info(db)
         migrate_user_status(db)
         migrate_approval_uniqueness(db)
+        migrate_asset_categories(db)
+        migrate_catalog_scopes(db)
         # 数据级迁移与 seed
         migrate_demo03(db)
         migrate_brands(db)
@@ -55,19 +60,22 @@ async def lifespan(app: FastAPI):
         migrate_demo03(db)
         migrate_brands(db)
         migrate_suppliers(db)
+        migrate_catalog_scopes(db)
         migrate_source_types(db)
     finally:
         db.close()
     yield
 
 
-app = FastAPI(title="服务器配件资产管理系统", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="电网资产及其配件数字化运营系统", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://127.0.0.1:5173",
         "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
         "http://127.0.0.1:4173",
         "http://localhost:4173",
     ],
@@ -77,6 +85,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix="/api")
+app.include_router(asset_categories.router, prefix="/api")
 app.include_router(catalog.router, prefix="/api")
 app.include_router(part_models.router, prefix="/api")
 app.include_router(parts.router, prefix="/api")

@@ -59,8 +59,37 @@ class PartModel(Base):
     # 内存可聚合正式列（方案甲）；其它类型保持 NULL。与 spec 双写。
     capacity_gb: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     ddr_gen: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    asset_category_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("asset_category.id"), nullable=True
+    )
 
     parts: Mapped[list["Part"]] = relationship(back_populates="model")
+
+
+class AssetCategory(Base):
+    """可扩展的三级资产目录。
+
+    business_category 用于将三级目录映射到已落地的配件品类；
+    留空表示目录已建档，但业务录入能力尚未接入。
+    """
+
+    __tablename__ = "asset_category"
+    __table_args__ = (
+        UniqueConstraint("parent_id", "name", name="uq_asset_category_parent_name"),
+        UniqueConstraint("business_category", name="uq_asset_category_business"),
+        Index("ix_asset_category_parent_sort", "parent_id", "sort_order", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    code: Mapped[Optional[str]] = mapped_column(String(50), unique=True, nullable=True)
+    level: Mapped[int] = mapped_column(Integer, nullable=False)
+    parent_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("asset_category.id"), nullable=True
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    business_category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
 
 class Part(Base):
@@ -187,6 +216,7 @@ class Brand(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     # 适用配件类型（八类子集）。空列表/null = 通用，各类型可选。
     categories: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    asset_category_ids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
 
 
 class Supplier(Base):
@@ -199,6 +229,7 @@ class Supplier(Base):
     contact: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     contact_info: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    asset_category_ids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
 
 
 class Approval(Base):

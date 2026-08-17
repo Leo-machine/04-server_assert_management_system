@@ -3,8 +3,10 @@ import { api } from '../api'
 import ListToolbar from '../components/ListToolbar'
 import { useSelection } from '../hooks/useSelection'
 import { filterByQuery } from '../lib/fuzzy'
+import AssetScopePicker from '../components/AssetScopePicker'
+import { assetScopeLabel, level2Categories } from '../lib/assetScopes'
 
-const emptyForm = { name: '', contact: '', contact_info: '', remark: '' }
+const emptyForm = { name: '', contact: '', contact_info: '', remark: '', asset_category_ids: [] }
 
 export default function Suppliers() {
   const [list, setList] = useState([])
@@ -14,10 +16,13 @@ export default function Suppliers() {
   const [ok, setOk] = useState('')
   const [query, setQuery] = useState('')
   const [batchBusy, setBatchBusy] = useState(false)
+  const [assetTree, setAssetTree] = useState([])
+  const [scopeFilter, setScopeFilter] = useState('')
 
   async function load() {
-    const rows = await api.get('/suppliers')
+    const [rows, tree] = await Promise.all([api.get('/suppliers'), api.get('/asset-categories?tree=true')])
     setList(rows)
+    setAssetTree(tree)
   }
 
   useEffect(() => {
@@ -26,13 +31,13 @@ export default function Suppliers() {
 
   const visible = useMemo(
     () =>
-      filterByQuery(list, query, (s) => [
+      filterByQuery(scopeFilter ? list.filter((s) => (s.asset_category_ids || []).includes(Number(scopeFilter))) : list, query, (s) => [
         s.name,
         s.contact,
         s.contact_info,
         s.remark,
       ]),
-    [list, query],
+    [list, query, scopeFilter],
   )
   const visibleIds = useMemo(() => visible.map((s) => s.id), [visible])
   const sel = useSelection(visibleIds)
@@ -49,6 +54,7 @@ export default function Suppliers() {
       contact: s.contact || '',
       contact_info: s.contact_info || '',
       remark: s.remark || '',
+      asset_category_ids: [...(s.asset_category_ids || [])],
     })
   }
 
@@ -61,6 +67,7 @@ export default function Suppliers() {
       contact: form.contact || null,
       contact_info: form.contact_info || null,
       remark: form.remark || null,
+      asset_category_ids: form.asset_category_ids,
     }
     try {
       if (editingId) {
@@ -124,6 +131,14 @@ export default function Suppliers() {
       {error && <div className="error">{error}</div>}
       {ok && <div className="ok-msg">{ok}</div>}
 
+      <div className="catalog-scope-filter">
+        <span>资产目录</span>
+        <select value={scopeFilter} onChange={(e) => { setScopeFilter(e.target.value); sel.clear() }}>
+          <option value="">全部专业与类别</option>
+          {level2Categories(assetTree).map((item) => <option key={item.id} value={item.id}>{item.domain} / {item.name}</option>)}
+        </select>
+      </div>
+
       <div className="split-layout">
         <form onSubmit={onSubmit}>
           <fieldset>
@@ -160,6 +175,10 @@ export default function Suppliers() {
                 rows={2}
               />
             </label>
+            <div>
+              <div className="muted" style={{ marginBottom: 6 }}>供应资产专业与二级类别（不选 = 通用）</div>
+              <AssetScopePicker tree={assetTree} value={form.asset_category_ids} onChange={(ids) => setForm({...form, asset_category_ids: ids})} />
+            </div>
             <div className="row-actions">
               <button type="submit">{editingId ? '保存' : '新增'}</button>
               {editingId && (
@@ -215,6 +234,7 @@ export default function Suppliers() {
                 <th>名称</th>
                 <th>联系人</th>
                 <th>联系方式</th>
+                <th>资产专业 / 类别</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -235,6 +255,7 @@ export default function Suppliers() {
                   </td>
                   <td>{s.contact || '—'}</td>
                   <td className="muted">{s.contact_info || '—'}</td>
+                  <td className="muted">{assetScopeLabel(s.asset_category_ids, assetTree)}</td>
                   <td>
                     <div className="row-actions">
                       <button type="button" className="secondary" onClick={() => startEdit(s)}>

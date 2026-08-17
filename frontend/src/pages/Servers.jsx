@@ -183,6 +183,9 @@ export default function Servers() {
   const [showImport, setShowImport] = useState(false)
   const [busy, setBusy] = useState(false)
   const [woPrompt, setWoPrompt] = useState(null) // { mode:'single'|'batch', ... }
+  const [assetTree, setAssetTree] = useState([])
+  const [domainId, setDomainId] = useState('')
+  const [deviceCategoryId, setDeviceCategoryId] = useState('')
 
   const [filterModel, setFilterModel] = useState('')
   const [filterLocation, setFilterLocation] = useState('')
@@ -199,7 +202,33 @@ export default function Servers() {
     api.get('/suppliers').then(setSuppliers).catch(() => {})
     api.get('/part-models?category=' + encodeURIComponent('服务器')).then(setServerModels).catch(() => {})
     api.get('/storage-locations').then(setLocs).catch(() => {})
+    api.get('/asset-categories?tree=true').then((tree) => {
+      const enabledRoots = tree.filter((node) => node.enabled)
+      setAssetTree(enabledRoots)
+      const serverParent = enabledRoots
+        .flatMap((node) => (node.children || []).map((child) => ({ root: node, child })))
+        .find(({ child }) => child.enabled && child.code === 'DIGITAL_SERVER')
+      const initialRoot = serverParent?.root || enabledRoots[0]
+      const initialChild = serverParent?.child || initialRoot?.children?.find((child) => child.enabled)
+      setDomainId(initialRoot ? String(initialRoot.id) : '')
+      setDeviceCategoryId(initialChild ? String(initialChild.id) : '')
+    }).catch((e) => setError(e.message))
   }, [])
+
+  const selectedDomain = assetTree.find((node) => String(node.id) === domainId)
+  const deviceCategories = (selectedDomain?.children || []).filter((node) => node.enabled)
+  const selectedDeviceCategory = deviceCategories.find((node) => String(node.id) === deviceCategoryId)
+  const serverCategoryReady = selectedDeviceCategory?.code === 'DIGITAL_SERVER'
+  const scopedSuppliers = suppliers.filter((supplier) => {
+    const scopes = supplier.asset_category_ids || []
+    return !scopes.length || (selectedDeviceCategory && scopes.includes(selectedDeviceCategory.id))
+  })
+
+  function chooseDomain(root) {
+    const children = (root.children || []).filter((node) => node.enabled)
+    setDomainId(String(root.id))
+    setDeviceCategoryId(children[0] ? String(children[0].id) : '')
+  }
 
   const searched = useMemo(
     () =>
@@ -428,12 +457,41 @@ export default function Servers() {
 
   return (
     <div className="panel">
-      <h2>服务器管理</h2>
+      <h2>设备管理</h2>
       <p className="muted">
-        维护服务器档案、机箱插槽规格与合同信息；点击资产编号或行查看详情与已装配件。
+        设备专业与类别同步自「资产类别管理」。请先选择数字化、计量或调度等专业，再进入对应的二级设备类别。
       </p>
+      <div className="device-domain-tabs" role="tablist" aria-label="资产专业">
+        {assetTree.map((root) => (
+          <button key={root.id} type="button" role="tab" aria-selected={domainId === String(root.id)}
+            className={domainId === String(root.id) ? 'is-active' : ''} onClick={() => chooseDomain(root)}>
+            {root.name}<small>{(root.children || []).filter((node) => node.enabled).length}</small>
+          </button>
+        ))}
+      </div>
+      <div className="device-type-tabs" role="tablist" aria-label="设备类别">
+        {!deviceCategories.length && <div className="device-category-empty">该专业暂未配置二级设备类别</div>}
+        {deviceCategories.map((category) => {
+          const ready = category.code === 'DIGITAL_SERVER'
+          return (
+            <button key={category.id} type="button" role="tab" aria-selected={deviceCategoryId === String(category.id)}
+              className={deviceCategoryId === String(category.id) ? 'is-active' : ''} onClick={() => setDeviceCategoryId(String(category.id))}>
+              <span><strong>{category.name}</strong><small>{ready ? `${servers.length} 台设备` : category.code || '未设置编码'}</small></span>
+              {!ready && <em>待接入</em>}
+            </button>
+          )
+        })}
+      </div>
       {error && <div className="error">{error}</div>}
       {msg && <div className="ok-msg">{msg}</div>}
+
+      {!serverCategoryReady ? (
+        <div className="device-empty-state">
+          <span>◇</span>
+          <strong>{selectedDeviceCategory ? `${selectedDeviceCategory.name}管理能力待接入` : '请选择设备类别'}</strong>
+          <p>{selectedDomain?.name || '当前专业'}的二级目录由资产类别管理统一维护，后续可在此扩展档案字段、导入模板和设备流转能力。</p>
+        </div>
+      ) : <>
 
       <ListToolbar
         query={query}
@@ -514,7 +572,7 @@ export default function Servers() {
           onCancel={() => setShowCreate(false)}
           busy={busy}
           title="新增服务器"
-          suppliers={suppliers}
+          suppliers={scopedSuppliers}
           serverModels={serverModels}
           locs={locs}
         />
@@ -539,7 +597,7 @@ export default function Servers() {
           onCancel={() => setEditing(null)}
           busy={busy}
           title={`编辑 ${editing.asset_no}`}
-          suppliers={suppliers}
+          suppliers={scopedSuppliers}
           serverModels={serverModels}
           locs={locs}
         />
@@ -570,12 +628,12 @@ export default function Servers() {
           <tbody>
             {visible.map((s) => (
               <tr key={s.id} className={sel.isSelected(s.id) ? 'is-selected' : ''}
-                style={{ cursor: 'pointer' }} onClick={() => nav(`/servers/${s.id}`)}>
+                style={{ cursor: 'pointer' }} onClick={() => nav(`/devices/${s.id}`)}>
                 <td className="lt-check-col" onClick={(e) => e.stopPropagation()}>
                   <input type="checkbox" checked={sel.isSelected(s.id)}
                     onChange={() => sel.toggle(s.id)} aria-label={`选择 ${s.asset_no}`} />
                 </td>
-                <td><Link to={`/servers/${s.id}`} onClick={(e) => e.stopPropagation()} className="srv-name">{s.asset_no}</Link></td>
+                <td><Link to={`/devices/${s.id}`} onClick={(e) => e.stopPropagation()} className="srv-name">{s.asset_no}</Link></td>
                 <td>{s.model || '-'}</td>
                 <td>{locLabel(s, locs)}</td>
                 <td>{s.responsible_group || '-'}</td>
@@ -620,6 +678,7 @@ export default function Servers() {
           onCancel={() => !batchBusy && setWoPrompt(null)}
         />
       )}
+      </>}
     </div>
   )
 }

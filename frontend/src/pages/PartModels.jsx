@@ -5,6 +5,7 @@ import ListToolbar from '../components/ListToolbar'
 import SpecFields, { formatSpec } from '../components/SpecFields'
 import { useSelection } from '../hooks/useSelection'
 import { filterByQuery } from '../lib/fuzzy'
+import { assetScopeLabel, level2Categories } from '../lib/assetScopes'
 
 /** 按类别从品牌+规格自动拼接型号名称 */
 const NAME_TEMPLATES = {
@@ -34,6 +35,7 @@ const emptyForm = {
   brand: '',
   pn: '',
   spec: {},
+  asset_category_id: '',
 }
 
 export default function PartModels() {
@@ -49,19 +51,46 @@ export default function PartModels() {
   const [ok, setOk] = useState('')
   const [query, setQuery] = useState('')
   const [batchBusy, setBatchBusy] = useState(false)
+  const [assetTree, setAssetTree] = useState([])
+  const [scopeFilter, setScopeFilter] = useState('')
+  const [domainFilter, setDomainFilter] = useState('')
+
+  const allScopes = useMemo(() => level2Categories(assetTree), [assetTree])
+  const categories = useMemo(
+    () => schemas.map((s) => s.category),
+    [schemas],
+  )
+  const selectedScope = allScopes.find((item) => String(item.id) === scopeFilter)
+  const activeDomain = assetTree.find((root) => String(root.id) === domainFilter)
+  const domainScopes = useMemo(
+    () => (activeDomain?.children || []).filter((item) => item.enabled),
+    [activeDomain],
+  )
+  const formScope = allScopes.find((item) => String(item.id) === String(form.asset_category_id))
+  const formDomain = assetTree.find((root) => root.id === formScope?.domainId)
+  const typesForScopes = (scopes) => [...new Set(scopes.flatMap((scope) => [
+    ...(scope.code === 'DIGITAL_SERVER' ? ['服务器'] : []),
+    ...(scope.children || []).map((item) => item.business_category).filter(Boolean),
+  ]))]
+  const scopeTypes = selectedScope
+    ? typesForScopes([selectedScope])
+    : domainFilter
+      ? typesForScopes(domainScopes)
+      : categories
 
   const schema = useMemo(
     () => schemas.find((s) => s.category === form.category),
     [schemas, form.category],
   )
 
-  const categories = useMemo(
-    () => schemas.map((s) => s.category),
-    [schemas],
-  )
-
   const visible = useMemo(() => {
-    const byCat = filterCat ? models.filter((m) => m.category === filterCat) : models
+    const domainScopeIds = new Set(domainScopes.map((item) => item.id))
+    const scoped = scopeFilter
+      ? models.filter((m) => String(m.asset_category_id || '') === scopeFilter)
+      : domainFilter
+        ? models.filter((m) => domainScopeIds.has(m.asset_category_id))
+        : models
+    const byCat = filterCat ? scoped.filter((m) => m.category === filterCat) : scoped
     return filterByQuery(byCat, query, (m) => [
       m.category,
       m.model_name,
@@ -71,32 +100,41 @@ export default function PartModels() {
       m.capacity_gb,
       m.ddr_gen,
     ])
-  }, [models, filterCat, query])
+  }, [models, filterCat, query, scopeFilter, domainFilter, domainScopes])
 
   const visibleIds = useMemo(() => visible.map((m) => m.id), [visible])
   const sel = useSelection(visibleIds)
 
   const categoryBrands = useMemo(() => {
-    if (!form.category) return brands
+    const scopeId = Number(form.asset_category_id || 0)
     return brands.filter((b) => {
+      const scopes = b.asset_category_ids || []
+      if (scopes.length && (!scopeId || !scopes.includes(scopeId))) return false
       const cats = b.categories || []
       if (!cats.length) return true
       return cats.includes(form.category)
     })
-  }, [brands, form.category])
+  }, [brands, form.category, form.asset_category_id])
 
   async function load() {
-    const [cats, ms, brs] = await Promise.all([
+    const [cats, ms, brs, tree] = await Promise.all([
       api.get('/categories'),
       api.get('/part-models'),
       api.get('/brands'),
+      api.get('/asset-categories?tree=true'),
     ])
     setSchemas(cats)
     setModels(ms)
     setBrands(brs)
+    setAssetTree(tree)
+    const serverScope = level2Categories(tree).find((item) => item.code === 'DIGITAL_SERVER')
+    const serverDomain = tree.find((root) => (root.children || []).some((item) => item.id === serverScope?.id))
+    setDomainFilter((current) => current || (serverDomain ? String(serverDomain.id) : String(tree[0]?.id || '')))
+    setScopeFilter((current) => current || (serverScope ? String(serverScope.id) : ''))
     setForm((f) => ({
       ...f,
       category: f.category || filterCat || cats[0]?.category || '',
+      asset_category_id: f.asset_category_id || (serverScope ? String(serverScope.id) : ''),
     }))
   }
 
@@ -121,7 +159,49 @@ export default function PartModels() {
       ...emptyForm,
       category: cat || filterCat || categories[0] || '',
       spec: {},
+      asset_category_id: form.asset_category_id || '',
     })
+  }
+
+  function fillCreateForm(scope, preferredType = '') {
+    if (!scope || editingId) return
+    const availableTypes = typesForScopes([scope])
+    const nextType = availableTypes.includes(preferredType)
+      ? preferredType
+      : availableTypes[0] || categories[0] || ''
+    setForm((current) => ({
+      ...(current.asset_category_id === String(scope.id) && current.category === nextType
+        ? current
+        : emptyForm),
+      asset_category_id: String(scope.id),
+      category: nextType,
+    }))
+  }
+
+  function chooseDomain(root) {
+    const firstScope = (root.children || []).find((item) => item.enabled)
+    setDomainFilter(String(root.id))
+    setScopeFilter(firstScope ? String(firstScope.id) : '')
+    setParams({})
+    sel.clear()
+    if (firstScope) fillCreateForm({ ...firstScope, domainId: root.id, domain: root.name })
+  }
+
+  function chooseScope(scope) {
+    setScopeFilter(String(scope.id))
+    setDomainFilter(String(scope.domainId || activeDomain?.id || ''))
+    setParams({})
+    sel.clear()
+    fillCreateForm(scope)
+  }
+
+  function chooseType(cat) {
+    setParams({ category: cat })
+    if (!editingId) {
+      const scope = selectedScope || allScopes.find((item) => String(item.id) === String(form.asset_category_id))
+      if (scope) fillCreateForm(scope, cat)
+      else setForm((current) => ({ ...current, category: cat, brand: '', spec: {} }))
+    }
   }
 
   function onSpecChange(key, value) {
@@ -136,6 +216,7 @@ export default function PartModels() {
       brand: m.brand || '',
       pn: m.pn || '',
       spec: { ...(m.spec || {}) },
+      asset_category_id: m.asset_category_id ? String(m.asset_category_id) : '',
     })
     setParams({ category: m.category })
     setError('')
@@ -146,12 +227,17 @@ export default function PartModels() {
     e.preventDefault()
     setError('')
     setOk('')
+    if (!form.asset_category_id) {
+      setError('请选择所属资产专业与二级类别')
+      return
+    }
     const body = {
       category: form.category,
       model_name: form.model_name,
       brand: form.brand || null,
       pn: form.pn || null,
       spec: form.spec,
+      asset_category_id: form.asset_category_id ? Number(form.asset_category_id) : null,
     }
     const savedCat = form.category
     try {
@@ -211,47 +297,50 @@ export default function PartModels() {
 
   return (
     <div className="panel">
-      <h2>配件型号管理</h2>
-      <p className="muted">
-        领导在此维护八类配件型号与规格字段。入库时按类型选择型号，规格随型号带入，确保数据可用、有价值。
-      </p>
+      <div className="model-page-head">
+        <div><h2>型号管理</h2><p className="muted">沿资产目录逐级定位型号，统一维护品牌、料号和规格参数。</p></div>
+        <div className="model-stats"><span><strong>{models.length}</strong>型号总数</span><span><strong>{brands.length}</strong>品牌</span><span><strong>{allScopes.length}</strong>设备类别</span></div>
+      </div>
       {error && <div className="error">{error}</div>}
       {ok && <div className="ok-msg">{ok}</div>}
 
-      <div className="chip-row">
-        <button
-          type="button"
-          className={`chip ${!filterCat ? 'active' : ''}`}
-          onClick={() => setParams({})}
-        >
-          全部
-        </button>
-        {categories.map((cat) => (
-          <button
-            key={cat}
-            type="button"
-            className={`chip ${filterCat === cat ? 'active' : ''}`}
-            onClick={() => {
-              setParams({ category: cat })
-              if (!editingId) {
-                setForm((f) => ({
-                  ...f,
-                  category: cat,
-                  brand: '',
-                  spec: {},
-                }))
-              }
-            }}
-          >
-            {cat}
-          </button>
-        ))}
+      <div className="model-catalog-browser">
+        <div className="model-browser-step"><span>01</span><strong>选择专业</strong></div>
+        <div className="model-domain-row">
+          <button type="button" className={!domainFilter ? 'is-active' : ''} onClick={() => { setDomainFilter(''); setScopeFilter(''); setParams({}); sel.clear() }}>全部专业</button>
+          {assetTree.filter((root) => root.enabled).map((root) => <button key={root.id} type="button" className={domainFilter === String(root.id) ? 'is-active' : ''} onClick={() => chooseDomain(root)}>{root.name}<small>{(root.children || []).filter((item) => item.enabled).length}</small></button>)}
+        </div>
+        <div className="model-browser-step"><span>02</span><strong>选择设备类别</strong></div>
+        <div className="model-scope-grid">
+          {(domainFilter ? domainScopes : allScopes).map((item) => {
+            const count = models.filter((model) => model.asset_category_id === item.id).length
+            return <button key={item.id} type="button" className={scopeFilter === String(item.id) ? 'is-active' : ''} onClick={() => chooseScope(item)}><span><strong>{item.name}</strong><small>{item.code || '未设置编码'}</small></span><em>{count}</em></button>
+          })}
+          {!(domainFilter ? domainScopes : allScopes).length && <p className="muted">该专业暂无二级设备类别</p>}
+        </div>
+        <div className="model-browser-step"><span>03</span><strong>具体型号类型</strong></div>
+        <div className="model-type-row">
+          <button type="button" className={!filterCat ? 'is-active' : ''} onClick={() => setParams({})}>全部类型</button>
+          {scopeTypes.map((cat) => <button key={cat} type="button" className={filterCat === cat ? 'is-active' : ''} onClick={() => chooseType(cat)}>{cat}<small>{models.filter((m) => (!scopeFilter || String(m.asset_category_id) === scopeFilter) && m.category === cat).length}</small></button>)}
+          {!scopeTypes.length && <span className="model-types-empty">该目录尚未配置具体型号类型</span>}
+        </div>
       </div>
 
-      <div className="split-layout">
+      <div className="split-layout model-workspace">
         <form className="inbound-form" onSubmit={onSubmit}>
           <fieldset>
             <legend>{editingId ? `编辑型号 #${editingId}` : '新增型号'}</legend>
+            <div className="model-form-path"><span>{formDomain?.name || '请选择专业'}</span><i>›</i><strong>{formScope?.name || '请选择设备类别'}</strong></div>
+            <label>所属专业 *
+              <select value={formDomain?.id || ''} onChange={(e) => { const root = assetTree.find((item) => String(item.id) === e.target.value); const first = (root?.children || []).find((item) => item.enabled); if (first) fillCreateForm({...first, domainId: root.id, domain: root.name}); else setForm({...form, asset_category_id: '', brand: ''}) }} required>
+                <option value="">— 请选择专业 —</option>{assetTree.filter((root) => root.enabled).map((root) => <option key={root.id} value={root.id}>{root.name}</option>)}
+              </select>
+            </label>
+            <label>设备类别 *
+              <select value={form.asset_category_id} onChange={(e) => { const scope = allScopes.find((item) => String(item.id) === e.target.value); if (scope) fillCreateForm(scope) }} required>
+                <option value="">— 请选择二级类别 —</option>{(formDomain?.children || []).filter((item) => item.enabled).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
             <label>
               配件类型 *
               <select
@@ -368,7 +457,8 @@ export default function PartModels() {
                     aria-label="全选"
                   />
                 </th>
-                <th>类型</th>
+                <th>资产专业 / 类别</th>
+                <th>具体类型</th>
                 <th>型号</th>
                 <th>规格</th>
                 <th>操作</th>
@@ -385,6 +475,7 @@ export default function PartModels() {
                       aria-label={`选择 ${m.model_name}`}
                     />
                   </td>
+                  <td className="muted">{assetScopeLabel(m.asset_category_id ? [m.asset_category_id] : [], assetTree)}</td>
                   <td><span className="badge">{m.category}</span></td>
                   <td>
                     <div>{m.model_name}</div>

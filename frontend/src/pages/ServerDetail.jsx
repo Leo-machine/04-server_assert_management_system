@@ -41,8 +41,8 @@ export default function ServerDetail() {
 
   return (
     <div className="pd-page">
-      <button type="button" className="back-link" onClick={() => nav('/servers')}>
-        返回服务器管理
+      <button type="button" className="back-link" onClick={() => nav('/devices')}>
+        返回设备管理
       </button>
 
       {error && <div className="error">{error}</div>}

@@ -3,13 +3,6 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api, getStoredUser, getToken, setStoredUser, setToken } from '../api'
 import { homePathFor } from '../lib/roles'
 
-const DEMO_ACCOUNTS = [
-  { user: 'qiancg', tip: '设备供应商 · 仅入库' },
-  { user: 'wawei', tip: '外委运维 · 与主业权限对等（不可审批）' },
-  { user: 'zhangyw', tip: '主业运维 · 流转/盘点（不可审批）' },
-  { user: 'admin', tip: '领导 · 全部权限含审批' },
-]
-
 export default function Login() {
   const nav = useNavigate()
   const [username, setUsername] = useState('')
@@ -51,7 +44,7 @@ export default function Login() {
       <div className="login-showcase">
         <div className="login-showcase-brand">
           <span className="login-showcase-mark"><img src="/logo.webp" alt="" /></span>
-          <span>数字化资产运营平台</span>
+          <span>电网资产数字化运营平台</span>
         </div>
         <div className="login-showcase-content">
           <p className="login-eyebrow">ASSET OPERATIONS</p>
@@ -64,7 +57,7 @@ export default function Login() {
       <div className="login-card">
         <div className="login-brand">
           <img src="/logo.webp" alt="Logo" className="login-logo" />
-          <h1>服务器配件资产管理系统</h1>
+          <h1>电网资产及其配件数字化运营系统</h1>
           <p>欢迎回来，请登录您的账号</p>
         </div>
         <form onSubmit={onSubmit}>
@@ -75,7 +68,7 @@ export default function Login() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              placeholder="zhangyw 或 张运维"
+              placeholder="请输入用户名"
               autoFocus
             />
           </label>
@@ -86,7 +79,7 @@ export default function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              placeholder="123456"
+              placeholder="请输入密码"
             />
           </label>
           <button type="submit" disabled={busy}>
@@ -96,27 +89,6 @@ export default function Login() {
         <p className="muted" style={{ textAlign: 'center' }}>
           没有账号？<Link to="/register">注册新账号（需领导审批）</Link>
         </p>
-        <div className="login-hint muted">
-          <p>演示账号（密码均为 123456）：</p>
-          <ul>
-            {DEMO_ACCOUNTS.map((a) => (
-              <li key={a.user}>
-                <button
-                  type="button"
-                  className="linkish"
-                  onClick={() => {
-                    setUsername(a.user)
-                    setPassword('123456')
-                  }}
-                >
-                  {a.user}
-                </button>
-                {' — '}
-                {a.tip}
-              </li>
-            ))}
-          </ul>
-        </div>
       </div>
       </div>
     </div>

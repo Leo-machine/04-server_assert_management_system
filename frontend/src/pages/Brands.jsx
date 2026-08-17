@@ -4,17 +4,19 @@ import { ALL_MANAGED_CATEGORIES } from '../lib/categories'
 import ListToolbar from '../components/ListToolbar'
 import { useSelection } from '../hooks/useSelection'
 import { filterByQuery } from '../lib/fuzzy'
+import AssetScopePicker from '../components/AssetScopePicker'
+import { assetScopeLabel, level2Categories } from '../lib/assetScopes'
 
 const ALL_CATEGORIES = ALL_MANAGED_CATEGORIES
 
-const emptyForm = { name: '', categories: [] }
+const emptyForm = { name: '', categories: [], asset_category_ids: [] }
 
 function catsLabel(cats) {
   if (!cats || !cats.length) return '通用（全部类型）'
   return cats.join('、')
 }
 
-function BrandTable({ rows, sel, onEdit, onDelete, showSelectAll = true }) {
+function BrandTable({ rows, sel, onEdit, onDelete, tree, showSelectAll = true }) {
   return (
     <table>
       <thead>
@@ -34,6 +36,7 @@ function BrandTable({ rows, sel, onEdit, onDelete, showSelectAll = true }) {
           </th>
           <th>品牌名称</th>
           <th>适用类型</th>
+          <th>资产专业 / 类别</th>
           <th>操作</th>
         </tr>
       </thead>
@@ -50,6 +53,7 @@ function BrandTable({ rows, sel, onEdit, onDelete, showSelectAll = true }) {
             </td>
             <td><strong>{b.name}</strong></td>
             <td className="muted">{catsLabel(b.categories)}</td>
+            <td className="muted">{assetScopeLabel(b.asset_category_ids, tree)}</td>
             <td>
               <div className="row-actions">
                 <button type="button" className="secondary" onClick={() => onEdit(b)}>
@@ -70,6 +74,8 @@ function BrandTable({ rows, sel, onEdit, onDelete, showSelectAll = true }) {
 export default function Brands() {
   const [brands, setBrands] = useState([])
   const [filterCat, setFilterCat] = useState('')
+  const [scopeFilter, setScopeFilter] = useState('')
+  const [assetTree, setAssetTree] = useState([])
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
   const [error, setError] = useState('')
@@ -79,8 +85,9 @@ export default function Brands() {
 
   async function load() {
     const q = filterCat ? `?category=${encodeURIComponent(filterCat)}` : ''
-    const list = await api.get(`/brands${q}`)
+    const [list, tree] = await Promise.all([api.get(`/brands${q}`), api.get('/asset-categories?tree=true')])
     setBrands(list)
+    setAssetTree(tree)
   }
 
   useEffect(() => {
@@ -89,19 +96,19 @@ export default function Brands() {
 
   const filtered = useMemo(
     () =>
-      filterByQuery(brands, query, (b) => [
+      filterByQuery(scopeFilter ? brands.filter((b) => (b.asset_category_ids || []).includes(Number(scopeFilter))) : brands, query, (b) => [
         b.name,
         ...(b.categories || []),
         catsLabel(b.categories),
       ]),
-    [brands, query],
+    [brands, query, scopeFilter],
   )
 
   const visibleIds = useMemo(() => filtered.map((b) => b.id), [filtered])
   const sel = useSelection(visibleIds)
 
   const grouped = useMemo(() => {
-    if (filterCat || query) return null
+    if (filterCat || scopeFilter || query) return null
     const map = {}
     for (const cat of ALL_CATEGORIES) map[cat] = []
     map['通用'] = []
@@ -117,7 +124,7 @@ export default function Brands() {
       }
     }
     return map
-  }, [filtered, filterCat, query])
+  }, [filtered, filterCat, scopeFilter, query])
 
   function resetForm() {
     setEditingId(null)
@@ -138,14 +145,14 @@ export default function Brands() {
 
   function startEdit(b) {
     setEditingId(b.id)
-    setForm({ name: b.name, categories: [...(b.categories || [])] })
+    setForm({ name: b.name, categories: [...(b.categories || [])], asset_category_ids: [...(b.asset_category_ids || [])] })
   }
 
   async function onSubmit(e) {
     e.preventDefault()
     setError('')
     setOk('')
-    const body = { name: form.name, categories: form.categories }
+    const body = { name: form.name, categories: form.categories, asset_category_ids: form.asset_category_ids }
     try {
       if (editingId) {
         await api.put(`/brands/${editingId}`, body)
@@ -233,6 +240,13 @@ export default function Brands() {
           </button>
         ))}
       </div>
+      <div className="catalog-scope-filter">
+        <span>资产目录</span>
+        <select value={scopeFilter} onChange={(e) => { setScopeFilter(e.target.value); sel.clear() }}>
+          <option value="">全部专业与类别</option>
+          {level2Categories(assetTree).map((item) => <option key={item.id} value={item.id}>{item.domain} / {item.name}</option>)}
+        </select>
+      </div>
 
       <div className="split-layout">
         <form onSubmit={onSubmit}>
@@ -263,6 +277,10 @@ export default function Brands() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div>
+              <div className="muted" style={{ marginBottom: 6 }}>适用资产专业与二级类别（不选 = 通用）</div>
+              <AssetScopePicker tree={assetTree} value={form.asset_category_ids} onChange={(ids) => setForm({...form, asset_category_ids: ids})} />
             </div>
             <div className="row-actions">
               <button type="submit">{editingId ? '保存' : '新增'}</button>
@@ -305,13 +323,14 @@ export default function Brands() {
             }
           />
 
-          {filterCat || query ? (
+          {filterCat || scopeFilter || query ? (
             <>
               <BrandTable
                 rows={filtered}
                 sel={sel}
                 onEdit={startEdit}
                 onDelete={onDelete}
+                tree={assetTree}
               />
               {!filtered.length && <p className="muted">无匹配品牌</p>}
             </>
@@ -327,6 +346,7 @@ export default function Brands() {
                     sel={sel}
                     onEdit={startEdit}
                     onDelete={onDelete}
+                    tree={assetTree}
                     showSelectAll={false}
                   />
                 </div>
