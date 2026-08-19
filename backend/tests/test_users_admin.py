@@ -76,6 +76,27 @@ def test_admin_patch_role_and_status(client):
     assert client.patch(f"/api/auth/users/{uid}", json={"status": "待审核"}, headers=leader_h).status_code == 400
 
 
+def test_admin_edit_name_and_reset_password(client):
+    cast = demo_cast(client)
+    leader_h = op_headers(cast["admin"]["id"])
+    uid = _create(client, leader_h, username="umg-reset").json()["id"]
+
+    result = client.patch(
+        f"/api/auth/users/{uid}",
+        json={"name": "更新后姓名", "password": "newpass123"},
+        headers=leader_h,
+    )
+    assert result.status_code == 200, result.json()
+    assert result.json()["name"] == "更新后姓名"
+    assert client.post(
+        "/api/auth/login",
+        json={"username": "umg-reset", "password": "newpass123"},
+    ).status_code == 200
+    assert client.patch(
+        f"/api/auth/users/{uid}", json={"password": "123"}, headers=leader_h
+    ).status_code == 400
+
+
 def test_admin_cannot_modify_self(client):
     cast = demo_cast(client)
     leader_h = op_headers(cast["admin"]["id"])
@@ -85,8 +106,8 @@ def test_admin_cannot_modify_self(client):
     assert "自己" in r.json()["detail"]
 
 
-def test_leader_count_invariant(client):
-    """领导数量不变式：互调时至少留一人在任；仅剩一名领导时无人能动他。"""
+def test_super_admin_is_protected_and_role_changes_take_effect(client):
+    """admin 不可降权；普通领导的角色调整仍应对旧令牌即时生效。"""
     cast = demo_cast(client)
     leader_h = op_headers(cast["admin"]["id"])
     admin_id = cast["admin"]["id"]
@@ -102,25 +123,18 @@ def test_leader_count_invariant(client):
     ).json()["token"]
     boss2_h = {"Authorization": f"Bearer {boss2_token}"}
 
-    # boss2 降权 admin → 允许（boss2 仍在任领导）
+    # 固定超级管理员不能被其他领导降权或停用。
     r = client.patch(f"/api/auth/users/{admin_id}", json={"role": "主业运维"}, headers=boss2_h)
-    assert r.status_code == 200
+    assert r.status_code == 400
+    assert "超级管理员" in r.json()["detail"]
+    disabled = client.patch(f"/api/auth/users/{admin_id}", json={"status": "停用"}, headers=boss2_h)
+    assert disabled.status_code == 400
 
-    # 此后 boss2 是唯一领导：admin（已非领导）无权再调，boss2 不能改自己 → 系统始终有领导
-    r2 = client.patch(f"/api/auth/users/{admin_id}", json={"role": "领导"}, headers=leader_h)
-    assert r2.status_code == 403
     boss2_id = next(
         u["id"] for u in client.get("/api/auth/users", headers=boss2_h).json()
         if u["username"] == "boss2"
     )
-    r3 = client.patch(f"/api/auth/users/{boss2_id}", json={"role": "主业运维"}, headers=boss2_h)
-    assert r3.status_code == 400
-    assert "自己" in r3.json()["detail"]
-
-    # boss2 可以把 admin 重新提为领导（恢复双领导）
-    r4 = client.patch(f"/api/auth/users/{admin_id}", json={"role": "领导"}, headers=boss2_h)
-    assert r4.status_code == 200
-    # admin 恢复领导后降权 boss2 → boss2 旧令牌的角色立即以 DB 为准
+    # admin 降权普通领导 → 旧令牌的角色立即以 DB 为准。
     r5 = client.patch(f"/api/auth/users/{boss2_id}", json={"role": "主业运维"}, headers=leader_h)
     assert r5.status_code == 200
     r6 = client.get("/api/auth/me", headers=boss2_h)

@@ -14,8 +14,7 @@ export default function AllocatableSummary() {
   const me = getStoredUser()
   const canView = hasRole(me, OPS_ROLES)
   const [rows, setRows] = useState([])
-  const [allRows, setAllRows] = useState([])
-  const [parts, setParts] = useState([])
+  const [overview, setOverview] = useState(null)
   const [category, setCategory] = useState('内存')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -38,14 +37,8 @@ export default function AllocatableSummary() {
 
   useEffect(() => {
     if (!canView) return undefined
-    Promise.all([
-      api.get('/inventory/allocatable-summary'),
-      api.get('/parts'),
-    ])
-      .then(([overviewRows, allParts]) => {
-        setAllRows(overviewRows)
-        setParts(allParts)
-      })
+    api.get('/inventory/allocatable-overview')
+      .then(setOverview)
       .catch((e) => setError(e.message))
   }, [canView])
 
@@ -73,34 +66,19 @@ export default function AllocatableSummary() {
   const pagination = usePagination(visible)
 
   const panorama = useMemo(() => {
-    const statuses = {}
-    for (const part of parts) {
-      const status = part.current_status || '未知'
-      statuses[status] = (statuses[status] || 0) + 1
-    }
-    const byCategory = Object.fromEntries(
-      PART_CATEGORIES.map((cat) => [cat, 0]),
-    )
-    for (const row of allRows) {
-      byCategory[row.category] = (byCategory[row.category] || 0) + (row.allocatable_count || 0)
-    }
-    const allocatable = Object.values(byCategory).reduce((sum, count) => sum + count, 0)
-    const inStock = statuses['在库'] || 0
-    const occupied = Math.max(0, parts.length - inStock)
-    const reserved = Math.max(0, inStock - allocatable)
-    const maxCategory = Math.max(1, ...Object.values(byCategory))
+    const byCategory = overview?.by_category || Object.fromEntries(PART_CATEGORIES.map((cat) => [cat, 0]))
     return {
-      total: parts.length,
-      inStock,
-      occupied,
-      allocatable,
-      reserved,
-      statuses,
+      total: overview?.total_assets || 0,
+      inStock: overview?.in_stock || 0,
+      occupied: overview?.occupied || 0,
+      allocatable: overview?.allocatable || 0,
+      reserved: overview?.reserved || 0,
+      statuses: overview?.by_status || {},
       byCategory,
-      maxCategory,
-      allocRate: inStock ? (allocatable / inStock) * 100 : 0,
+      maxCategory: Math.max(1, ...Object.values(byCategory)),
+      allocRate: overview?.alloc_rate || 0,
     }
-  }, [parts, allRows])
+  }, [overview])
 
   if (!canView) {
     return <Navigate to={homePathFor(me)} replace />
@@ -110,30 +88,11 @@ export default function AllocatableSummary() {
     <div className="as-page">
       <header className="as-header">
         <div>
+          <span className="as-page-kicker">资源调配 · ALLOCATABLE CAPACITY</span>
           <h2>可调余量</h2>
           <p className="muted">
             在库 ∩ 本单位信息中心 ∩ 通用可调 · 内存按规格聚合，其余品类按型号聚合
           </p>
-        </div>
-        <div className="as-controls">
-          <label className="as-field">
-            <span>品类</span>
-            <select value={category} onChange={(e) => setCategory(e.target.value)}>
-              {PART_CATEGORIES.map(
-                (c) => (
-                  <option key={c} value={c}>{c}</option>
-                ),
-              )}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => load(category)}
-            disabled={loading}
-          >
-            {loading ? '刷新中…' : '刷新'}
-          </button>
         </div>
       </header>
 
@@ -186,7 +145,7 @@ export default function AllocatableSummary() {
         <div className="as-category-map" aria-label="各品类可调数量">
           <div className="as-category-map-title">
             <strong>全品类可调能力</strong>
-            <span className="muted">条形长度表示各品类可调数量</span>
+            <span className="muted">点击品类查看明细 · 条形长度表示可调数量</span>
           </div>
           <div className="as-category-grid">
             {PART_CATEGORIES.map((cat) => {
@@ -218,10 +177,6 @@ export default function AllocatableSummary() {
           <div className="as-kpi-value">{chart.specs}</div>
           <div className="as-kpi-label">规格组数</div>
         </div>
-        <div className="as-kpi-card">
-          <div className="as-kpi-value">{category}</div>
-          <div className="as-kpi-label">当前品类</div>
-        </div>
         <div className="as-kpi-card as-kpi-owner">
           <div className="as-kpi-value as-kpi-sm">
             {rows[0]?.home_owner_unit || '本单位信息中心'}
@@ -245,7 +200,7 @@ export default function AllocatableSummary() {
       <div className="as-body">
         <section className="as-chart-card" aria-label="可调余量柱状图">
           <div className="as-section-title">
-            <h3>规格分布</h3>
+            <h3>{category}规格分布</h3>
             <span className="muted">柱高 = 可调数量</span>
           </div>
 
@@ -283,7 +238,7 @@ export default function AllocatableSummary() {
 
         <section className="as-table-card">
           <div className="as-section-title">
-            <h3>明细</h3>
+            <h3>{category}明细</h3>
             <span className="muted">与图同源数据</span>
           </div>
           <div className="as-table-wrap">

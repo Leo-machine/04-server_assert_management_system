@@ -92,6 +92,36 @@ def test_snapshot_frozen_after_realtime_install(client):
     assert live["current_loc_id"] == server["id"]
 
 
+def test_scoped_stocktakes_and_list_summary(client):
+    parts = client.get("/api/parts", headers=op_headers(1)).json()
+    target = parts[0]
+
+    by_group = client.post(
+        "/api/stocktakes",
+        json={"scope_kind": "按责任组", "scope_value": {"responsible_group": target["responsible_group"]}},
+        headers=op_headers(1),
+    )
+    assert by_group.status_code == 200, by_group.json()
+    assert by_group.json()["items"]
+    expected_ids = {p["id"] for p in parts if p["responsible_group"] == target["responsible_group"]}
+    assert {item["part_id"] for item in by_group.json()["items"]} == expected_ids
+
+    selected = client.post(
+        "/api/stocktakes",
+        json={"scope_kind": "指定清单", "scope_value": {"asset_nos": [target["fixed_asset_no"]]}},
+        headers=op_headers(1),
+    )
+    assert selected.status_code == 200, selected.json()
+    assert [item["part_id"] for item in selected.json()["items"]] == [target["id"]]
+
+    rows = client.get("/api/stocktakes", headers=op_headers(1)).json()
+    listed = next(row for row in rows if row["id"] == selected.json()["id"])
+    assert listed["scope_value"]["asset_nos"] == [target["fixed_asset_no"]]
+    assert listed["item_count"] == 1
+    assert listed["initiator_name"]
+    assert listed["summary"][enums.RESULT_PENDING] == 1
+
+
 def test_shortage_does_not_touch_part_or_movements(client):
     part = _stock_part(client)
     before_moves = client.get(f"/api/parts/{part['id']}/movements", headers=op_headers(1)).json()

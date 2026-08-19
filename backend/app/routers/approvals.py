@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from .. import enums
-from ..deps import get_current_user, require_role
+from ..deps import get_current_user, is_super_admin, require_role
 from ..models import User
 from ..schemas import (
     ApprovalOut,
@@ -55,6 +55,7 @@ def create_loan(
             expected_return_date=body.expected_return_date,
             approver_ids=body.approver_ids,
             remark=body.remark,
+            auto_approve=is_super_admin(current_user) and not body.approver_ids,
         )
     except BusinessError as e:
         raise HTTPException(status_code=400, detail=e.message) from e
@@ -77,6 +78,7 @@ def create_transfer(
             approver_ids=body.approver_ids,
             reason_code=body.reason_code,
             remark=body.remark,
+            auto_approve=is_super_admin(current_user) and not body.approver_ids,
         )
     except BusinessError as e:
         raise HTTPException(status_code=400, detail=e.message) from e
@@ -99,6 +101,7 @@ def create_scrap(
             reason_code=body.reason_code,
             attachment_ref=body.attachment_ref,
             remark=body.remark,
+            auto_approve=is_super_admin(current_user) and not body.approver_ids,
         )
     except BusinessError as e:
         raise HTTPException(status_code=400, detail=e.message) from e

@@ -32,6 +32,10 @@ export function isLeader(user) {
   return (user?.role || '') === ROLE_LEADER
 }
 
+export function isSuperAdmin(user) {
+  return user?.is_super_admin === true || (user?.username || '').trim().toLowerCase() === 'admin'
+}
+
 /** 登录后默认落地页 */
 export function homePathFor(user) {
   if (isSupplier(user)) return '/inbound'

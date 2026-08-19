@@ -71,7 +71,22 @@ def list_stocktakes(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return stocktake_service.list_stocktakes(db)
+    rows = stocktake_service.list_stocktakes(db)
+    return [
+        StocktakeListOut(
+            id=st.id,
+            scope_kind=st.scope_kind,
+            scope_value=st.scope_value,
+            initiator_id=st.initiator_id,
+            initiator_name=st.initiator.name if st.initiator else None,
+            initiated_at=st.initiated_at,
+            snapshot_at=st.snapshot_at,
+            status=st.status,
+            item_count=len(st.items),
+            summary=stocktake_service.summarize(st),
+        )
+        for st in rows
+    ]
 
 
 @router.get("/{stocktake_id}", response_model=StocktakeOut)

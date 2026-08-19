@@ -5,13 +5,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from .. import enums
+from ..category_specs import PART_CATEGORIES
 from ..models import (
     ExternalOrg,
     Part,
+    PartModel,
     Server,
     Stocktake,
     StocktakeDiscrepancy,
@@ -142,9 +144,45 @@ def create_stocktake(
 ) -> Stocktake:
     if scope_kind not in enums.SCOPE_KINDS:
         raise BusinessError(f"非法 scope_kind: {scope_kind}")
-    if scope_kind != enums.SCOPE_FULL:
-        raise BusinessError("demo 仅支持发起「全盘」")
     _require_user(db, initiator_id)
+
+    value = scope_value or {}
+    stmt = select(Part).order_by(Part.id)
+    if scope_kind == "按机房":
+        location_id = value.get("location_id")
+        if not isinstance(location_id, int) or db.get(StorageLocation, location_id) is None:
+            raise BusinessError("按机房盘点必须选择有效存放位置")
+        stmt = stmt.where(
+            Part.current_loc_kind == enums.LOC_STORAGE,
+            Part.current_loc_id == location_id,
+        )
+    elif scope_kind == "按责任组":
+        responsible_group = str(value.get("responsible_group") or "").strip()
+        if responsible_group not in enums.RESPONSIBLE_GROUPS:
+            raise BusinessError("按责任组盘点必须选择有效责任组")
+        stmt = stmt.where(Part.responsible_group == responsible_group)
+    elif scope_kind == "按配件类型":
+        category = str(value.get("category") or "").strip()
+        if category not in PART_CATEGORIES:
+            raise BusinessError("按配件类型盘点必须选择有效类型")
+        stmt = stmt.join(PartModel, Part.model_id == PartModel.id).where(
+            PartModel.category == category
+        )
+    elif scope_kind == "指定清单":
+        part_ids = value.get("part_ids") or []
+        asset_nos = value.get("asset_nos") or []
+        if not isinstance(part_ids, list) or not isinstance(asset_nos, list):
+            raise BusinessError("指定清单参数格式错误")
+        clean_ids = [item for item in part_ids if isinstance(item, int)]
+        clean_nos = [str(item).strip() for item in asset_nos if str(item).strip()]
+        if not clean_ids and not clean_nos:
+            raise BusinessError("指定清单至少需要一个配件")
+        conditions = []
+        if clean_ids:
+            conditions.append(Part.id.in_(clean_ids))
+        if clean_nos:
+            conditions.append(Part.fixed_asset_no.in_(clean_nos))
+        stmt = stmt.where(or_(*conditions))
 
     now = utcnow()
     st = Stocktake(
@@ -158,7 +196,9 @@ def create_stocktake(
     db.add(st)
     db.flush()
 
-    parts = list(db.scalars(select(Part).order_by(Part.id)).all())
+    parts = list(db.scalars(stmt).all())
+    if not parts:
+        raise BusinessError("当前盘点范围内没有配件")
     for part in parts:
         db.add(
             StocktakeItem(
@@ -175,7 +215,11 @@ def create_stocktake(
 
 def list_stocktakes(db: Session) -> list[Stocktake]:
     return list(
-        db.scalars(select(Stocktake).order_by(Stocktake.id.desc())).all()
+        db.scalars(
+            select(Stocktake)
+            .options(joinedload(Stocktake.items), joinedload(Stocktake.initiator))
+            .order_by(Stocktake.id.desc())
+        ).unique().all()
     )
 
 

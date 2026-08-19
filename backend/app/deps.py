@@ -146,7 +146,14 @@ def get_operator_id(current_user: User = Depends(get_current_user)) -> int:
     return current_user.id
 
 
+def is_super_admin(user: User) -> bool:
+    """超级管理员使用固定登录账号识别，避免显示名或业务角色变更导致权限漂移。"""
+    return bool(getattr(user, "is_super_admin", False))
+
+
 def require_role(user: User, allowed: tuple[str, ...]) -> None:
+    if is_super_admin(user):
+        return
     if (user.role or "") not in allowed:
         raise HTTPException(
             status_code=403,

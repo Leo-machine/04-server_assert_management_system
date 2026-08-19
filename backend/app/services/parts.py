@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from .. import enums
 from ..models import (
+    Approval,
+    MovementLog,
     Part,
     PartModel,
     PartServerLink,
@@ -366,6 +368,34 @@ def uninstall(
     db.commit()
     db.refresh(part)
     return part
+
+
+def delete_part(db: Session, *, part_id: int) -> None:
+    """删除误录配件；仅限未发生后续业务流转的在库记录。"""
+    part = db.get(Part, part_id)
+    if part is None:
+        raise BusinessError("配件不存在")
+    require_status(part, {enums.STATUS_IN_STOCK}, "删除")
+    if part.server_link is not None:
+        raise BusinessError("配件存在装机关系，不能删除")
+    if db.scalars(
+        select(Approval.id).where(Approval.part_id == part_id).limit(1)
+    ).first() is not None:
+        raise BusinessError("配件已有审批记录，不能删除；请保留审计履历")
+
+    movements = list(
+        db.scalars(
+            select(MovementLog)
+            .where(MovementLog.part_id == part_id)
+            .order_by(MovementLog.id)
+        ).all()
+    )
+    if len(movements) != 1 or movements[0].event_type != enums.EVENT_INBOUND:
+        raise BusinessError("配件已有业务流转履历，不能删除；仅支持清理未流转的误录数据")
+
+    db.delete(movements[0])
+    db.delete(part)
+    db.commit()
 
 
 def report_damage(

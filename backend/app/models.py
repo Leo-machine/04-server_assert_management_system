@@ -42,6 +42,11 @@ class User(Base):
     reviewed_by_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    @property
+    def is_super_admin(self) -> bool:
+        """固定账号 admin 是系统级超级管理员，不依赖可编辑的业务角色。"""
+        return (self.username or "").strip().casefold() == "admin"
+
 
 class PartModel(Base):
     __tablename__ = "part_model"
@@ -268,6 +273,11 @@ class Approval(Base):
     part: Mapped["Part"] = relationship()
     applicant: Mapped["User"] = relationship(foreign_keys=[applicant_id])
     dest_org: Mapped["ExternalOrg"] = relationship()
+
+    @property
+    def auto_approved(self) -> bool:
+        """无人工节点且已直接通过的超级管理员业务单。"""
+        return self.current_level == 0 and self.overall_status == "通过" and not self.steps
 
 
 class ApprovalStep(Base):

@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..models import Part, Supplier
@@ -9,7 +9,17 @@ from .asset_categories import normalize_level2_ids
 
 
 def list_suppliers(db: Session) -> list[Supplier]:
-    return list(db.scalars(select(Supplier).order_by(Supplier.name)).all())
+    rows = list(db.scalars(select(Supplier).order_by(Supplier.name)).all())
+    usage = dict(
+        db.execute(
+            select(Part.supplier, func.count(Part.id))
+            .where(Part.supplier.is_not(None))
+            .group_by(Part.supplier)
+        ).all()
+    )
+    for row in rows:
+        row.usage_count = int(usage.get(row.name, 0))
+    return rows
 
 
 def _supplier_in_use(db: Session, name: str) -> bool:

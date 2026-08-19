@@ -269,6 +269,21 @@ def uninstall(
     return _part_out(db, part)
 
 
+@router.delete("/parts/{part_id}")
+def delete_part(
+    part_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除误录资产：仅领导可操作，已有业务履历的数据禁止删除。"""
+    require_role(current_user, (enums.ROLE_LEADER,))
+    try:
+        parts_service.delete_part(db, part_id=part_id)
+    except BusinessError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+    return {"ok": True}
+
+
 @router.post("/parts/{part_id}/damage", response_model=PartOut)
 def damage(
     part_id: int,

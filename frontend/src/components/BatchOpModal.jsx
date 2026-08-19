@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api'
+import { api, getStoredUser } from '../api'
 import ApproverSelects, { useDefaultApprovers } from './ApproverSelects'
 import { SCRAP_REASONS } from '../lib/categories'
+import { isSuperAdmin } from '../lib/roles'
 
 const OP_META = {
   install: { title: '批量装机', need: null },
+  uninstall: { title: '批量拆下', need: null },
   loan: { title: '批量借出（三级审批）', need: 'approval' },
   transfer: { title: '批量调拨（三级审批）', need: 'approval' },
   scrap: { title: '批量报废（三级审批）', need: 'approval' },
@@ -20,9 +22,15 @@ function locLabel(server, locs) {
 
 export default function BatchOpModal({ op, targets: targetsProp, servers, orgs, users, locs, onClose, onDone }) {
   const meta = OP_META[op]
+  const superAdmin = isSuperAdmin(getStoredUser())
+  const displayTitle = superAdmin && meta.need === 'approval'
+    ? meta.title.replace('（三级审批）', '（超级管理员免审批）')
+    : meta.title
   const [frozenTargets] = useState(() => [...(targetsProp || [])])
   const targets = frozenTargets
   const [serverId, setServerId] = useState('')
+  const [storageLocationId, setStorageLocationId] = useState('')
+  const [damaged, setDamaged] = useState(false)
   const [orgId, setOrgId] = useState('')
   const [date, setDate] = useState(() => {
     const d = new Date()
@@ -39,7 +47,8 @@ export default function BatchOpModal({ op, targets: targetsProp, servers, orgs, 
   useEffect(() => {
     if (servers.length && !serverId) setServerId(String(servers[0].id))
     if (orgs.length && !orgId) setOrgId(String(orgs[0].id))
-  }, [servers, orgs])
+    if (locs.length && !storageLocationId) setStorageLocationId(String(locs[0].id))
+  }, [servers, orgs, locs, serverId, orgId, storageLocationId])
 
   const gpuCount = targets.filter((p) => p.model?.category === '算力卡').length
 
@@ -51,6 +60,10 @@ export default function BatchOpModal({ op, targets: targetsProp, servers, orgs, 
         return
       }
     }
+    if (op === 'uninstall' && !Number(storageLocationId)) {
+      setError('请选择拆下后的目标库位')
+      return
+    }
     if ((op === 'loan' || op === 'transfer') && !Number(orgId)) {
       setError('请选择外单位')
       return
@@ -59,7 +72,7 @@ export default function BatchOpModal({ op, targets: targetsProp, servers, orgs, 
       setError('报损必须填写损坏情况说明')
       return
     }
-    if (meta.need === 'approval') {
+    if (meta.need === 'approval' && !superAdmin) {
       const ids = approvers.map(Number)
       if (ids.some((n) => !n) || new Set(ids).size !== 3) {
         setError('请选择三位互不相同的审批人（须为领导）')
@@ -77,6 +90,12 @@ export default function BatchOpModal({ op, targets: targetsProp, servers, orgs, 
       try {
         if (op === 'install') {
           await api.post(`/parts/${p.id}/install`, { server_id: Number(serverId), remark: remark || null })
+        } else if (op === 'uninstall') {
+          await api.post(`/parts/${p.id}/uninstall`, {
+            storage_location_id: Number(storageLocationId),
+            damaged,
+            remark: remark || null,
+          })
         } else if (op === 'damage') {
           await api.post(`/parts/${p.id}/damage`, { remark: remark.trim() })
         } else if (op === 'loan') {
@@ -84,21 +103,21 @@ export default function BatchOpModal({ op, targets: targetsProp, servers, orgs, 
             part_id: p.id,
             dest_org_id: Number(orgId),
             expected_return_date: date,
-            approver_ids: approvers.map(Number),
+            approver_ids: superAdmin ? [] : approvers.map(Number),
             remark: remark || null,
           })
         } else if (op === 'transfer') {
           await api.post('/approvals/transfer', {
             part_id: p.id,
             dest_org_id: Number(orgId),
-            approver_ids: approvers.map(Number),
+            approver_ids: superAdmin ? [] : approvers.map(Number),
             remark: remark || null,
           })
         } else if (op === 'scrap') {
           await api.post('/approvals/scrap', {
             part_id: p.id,
             reason_code: reasonCode,
-            approver_ids: approvers.map(Number),
+            approver_ids: superAdmin ? [] : approvers.map(Number),
             attachment_ref: attachment || null,
             remark: remark || null,
           })
@@ -115,13 +134,14 @@ export default function BatchOpModal({ op, targets: targetsProp, servers, orgs, 
   return (
     <div className="pl-modal-mask" onClick={busy ? undefined : onClose}>
       <div className="pl-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{meta.title}</h3>
+        <h3>{displayTitle}</h3>
         <p className="muted">
           将处理 <strong>{targets.length}</strong> 件：
           {targets.slice(0, 6).map((p) => p.fixed_asset_no).join('、')}
           {targets.length > 6 ? ` 等 ${targets.length} 件` : ''}
         </p>
         {error && <div className="error">{error}</div>}
+        {superAdmin && meta.need === 'approval' && <div className="super-admin-bypass"><strong>超级管理员直通</strong><span>所选业务将逐项立即生效并保留完整操作履历。</span></div>}
 
         {op === 'install' && (
           <label>
@@ -135,6 +155,21 @@ export default function BatchOpModal({ op, targets: targetsProp, servers, orgs, 
               ))}
             </select>
           </label>
+        )}
+        {op === 'uninstall' && (
+          <>
+            <label>
+              拆下后存放位置
+              <select value={storageLocationId} onChange={(e) => setStorageLocationId(e.target.value)} disabled={busy}>
+                {!locs.length && <option value="">暂无可用库位</option>}
+                {locs.map((loc) => <option key={loc.id} value={loc.id}>{loc.warehouse}/{loc.slot}{loc.location_type ? ` · ${loc.location_type}` : ''}</option>)}
+              </select>
+            </label>
+            <label className="batch-uninstall-damaged">
+              <input type="checkbox" checked={damaged} onChange={(e) => setDamaged(e.target.checked)} disabled={busy} />
+              <span><strong>拆下后标记为损坏</strong><small>不勾选则恢复为“在库”状态</small></span>
+            </label>
+          </>
         )}
         {(op === 'loan' || op === 'transfer') && (
           <label>
@@ -169,7 +204,7 @@ export default function BatchOpModal({ op, targets: targetsProp, servers, orgs, 
             </label>
           </>
         )}
-        {meta.need === 'approval' && (
+        {meta.need === 'approval' && !superAdmin && (
           <ApproverSelects users={users} value={approvers} onChange={setApprovers} />
         )}
         <label>
@@ -178,7 +213,7 @@ export default function BatchOpModal({ op, targets: targetsProp, servers, orgs, 
         </label>
         <div className="row-actions" style={{ marginTop: '0.5rem' }}>
           <button type="button" disabled={busy} onClick={submit}>
-            {busy ? `处理中…（${targets.length} 件）` : `确认${meta.title.split('（')[0]} ${targets.length} 件`}
+            {busy ? `处理中…（${targets.length} 件）` : `确认${displayTitle.split('（')[0]} ${targets.length} 件`}
           </button>
           <button type="button" className="secondary" disabled={busy} onClick={onClose}>取消</button>
         </div>

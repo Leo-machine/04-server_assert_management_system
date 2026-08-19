@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from .. import enums
 from ..category_specs import PART_CATEGORIES
@@ -17,6 +17,48 @@ CATEGORY_GROUP_DIMS: dict[str, tuple[str, ...]] = {
 }
 
 ALL_CATEGORIES = PART_CATEGORIES
+
+
+def allocatable_overview(
+    db: Session,
+    *,
+    home_owner_unit: str = enums.HOME_OWNER_UNIT,
+) -> dict:
+    """返回可调余量页的全景口径，避免前端下载全部配件后重复聚合。"""
+    parts = list(db.scalars(select(Part).options(joinedload(Part.model))).all())
+    by_status: dict[str, int] = {}
+    by_category = {category: 0 for category in ALL_CATEGORIES}
+    allocatable = 0
+    in_stock = 0
+
+    for part in parts:
+        status = part.current_status or "未知"
+        by_status[status] = by_status.get(status, 0) + 1
+        if status != enums.STATUS_IN_STOCK:
+            continue
+        in_stock += 1
+        is_allocatable = (
+            part.owner_unit == home_owner_unit
+            and part.allocatable_flag == enums.ALLOC_GENERAL
+        )
+        if is_allocatable:
+            allocatable += 1
+            category = part.model.category if part.model else "未分类"
+            by_category[category] = by_category.get(category, 0) + 1
+
+    occupied = max(0, len(parts) - in_stock)
+    reserved = max(0, in_stock - allocatable)
+    return {
+        "total_assets": len(parts),
+        "in_stock": in_stock,
+        "occupied": occupied,
+        "allocatable": allocatable,
+        "reserved": reserved,
+        "alloc_rate": (allocatable / in_stock * 100) if in_stock else 0.0,
+        "by_category": by_category,
+        "by_status": by_status,
+        "home_owner_unit": home_owner_unit,
+    }
 
 
 def allocatable_summary(

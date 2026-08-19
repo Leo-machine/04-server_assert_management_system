@@ -118,12 +118,22 @@ def _create_approval(
     reason_code: Optional[str] = None,
     attachment_ref: Optional[str] = None,
     remark: Optional[str] = None,
+    auto_approve: bool = False,
 ) -> Approval:
     rules = _ACTION_RULES[action_type]
 
-    _validate_people(db, applicant_id=applicant_id, approver_ids=approver_ids)
+    if not auto_approve:
+        _validate_people(db, applicant_id=applicant_id, approver_ids=approver_ids)
+    else:
+        applicant = db.get(User, applicant_id)
+        if applicant is None:
+            raise BusinessError("申请人不存在")
+        if applicant.status != enums.USER_STATUS_ACTIVE:
+            raise BusinessError("超级管理员账号状态异常，不能执行免审批操作")
 
-    part = db.get(Part, part_id)
+    part = db.scalars(
+        select(Part).where(Part.id == part_id).with_for_update()
+    ).first()
     if part is None:
         raise BusinessError("配件不存在")
     require_status(part, rules["allowed_status"], f"发起{action_type}")
@@ -136,8 +146,10 @@ def _create_approval(
         action_type=action_type,
         applicant_id=applicant_id,
         applied_at=datetime.now(timezone.utc),
-        overall_status=enums.APPROVAL_PENDING,
-        current_level=1,
+        overall_status=(
+            enums.APPROVAL_APPROVED if auto_approve else enums.APPROVAL_PENDING
+        ),
+        current_level=0 if auto_approve else 1,
         expected_return_date=expected_return_date,
         dest_org_id=dest_org_id,
         reason_code=reason_code,
@@ -146,6 +158,33 @@ def _create_approval(
     )
     db.add(approval)
     db.flush()
+
+    if auto_approve:
+        if rules["loc_to_kind"] == enums.LOC_EXTERNAL:
+            loc_to_kind = enums.LOC_EXTERNAL
+            loc_to_id = approval.dest_org_id
+        else:
+            loc_to_kind = enums.LOC_NONE
+            loc_to_id = None
+        movement = insert_movement(
+            db,
+            part_id=part.id,
+            event_type=rules["event_type"],
+            status_from=part.current_status,
+            status_to=rules["status_to"],
+            operator_id=applicant_id,
+            loc_from_kind=part.current_loc_kind,
+            loc_from_id=part.current_loc_id,
+            loc_to_kind=loc_to_kind,
+            loc_to_id=loc_to_id,
+            approval_id=approval.id,
+            expected_return_date=approval.expected_return_date,
+            reason_code=approval.reason_code,
+            remark=approval.remark,
+        )
+        apply_projection_from_movement(part, movement)
+        db.commit()
+        return get_approval(db, approval.id)
 
     for level, approver_id in enumerate(approver_ids, start=1):
         # 仅第 1 级为「待审」；其余级等待激活（状态仍用待审，靠 current_level 门禁）
@@ -177,6 +216,7 @@ def create_loan_approval(
     expected_return_date: date,
     approver_ids: list[int],
     remark: Optional[str] = None,
+    auto_approve: bool = False,
 ) -> Approval:
     if expected_return_date is None:
         raise BusinessError("借出必须填写预期归还日")
@@ -192,6 +232,7 @@ def create_loan_approval(
         expected_return_date=expected_return_date,
         dest_org_id=dest_org_id,
         remark=remark,
+        auto_approve=auto_approve,
     )
 
 def create_transfer_approval(
@@ -203,6 +244,7 @@ def create_transfer_approval(
     approver_ids: list[int],
     reason_code: Optional[str] = None,
     remark: Optional[str] = None,
+    auto_approve: bool = False,
 ) -> Approval:
     _require_dest_org(db, dest_org_id)
     return _create_approval(
@@ -214,6 +256,7 @@ def create_transfer_approval(
         dest_org_id=dest_org_id,
         reason_code=(reason_code or "").strip() or None,
         remark=remark,
+        auto_approve=auto_approve,
     )
 
 def create_scrap_approval(
@@ -225,6 +268,7 @@ def create_scrap_approval(
     reason_code: str,
     attachment_ref: Optional[str] = None,
     remark: Optional[str] = None,
+    auto_approve: bool = False,
 ) -> Approval:
     if reason_code not in enums.REASON_CODES_SCRAP:
         raise BusinessError(
@@ -251,6 +295,7 @@ def create_scrap_approval(
         reason_code=reason_code,
         attachment_ref=(attachment_ref or "").strip() or None,
         remark=remark,
+        auto_approve=auto_approve,
     )
 
 def get_approval(db: Session, approval_id: int) -> Approval:

@@ -12,6 +12,7 @@ class UserOut(BaseModel):
     role_label: Optional[str] = None
     role: Optional[str] = None
     status: Optional[str] = None
+    is_super_admin: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -339,6 +340,18 @@ class AllocatableSummaryItem(BaseModel):
     home_owner_unit: str
 
 
+class AllocatableOverviewOut(BaseModel):
+    total_assets: int
+    in_stock: int
+    occupied: int
+    allocatable: int
+    reserved: int
+    alloc_rate: float
+    by_category: dict[str, int]
+    by_status: dict[str, int]
+    home_owner_unit: str
+
+
 class InstallIn(BaseModel):
     server_id: int
     slot: Optional[str] = None
@@ -364,14 +377,14 @@ class LoanApprovalIn(BaseModel):
     part_id: int
     dest_org_id: int
     expected_return_date: date
-    approver_ids: list[int] = Field(..., min_length=3, max_length=3)
+    approver_ids: list[int] = Field(default_factory=list, max_length=3)
     remark: Optional[str] = None
 
 
 class TransferApprovalIn(BaseModel):
     part_id: int
     dest_org_id: int
-    approver_ids: list[int] = Field(..., min_length=3, max_length=3)
+    approver_ids: list[int] = Field(default_factory=list, max_length=3)
     reason_code: Optional[str] = None
     remark: Optional[str] = None
 
@@ -379,7 +392,7 @@ class TransferApprovalIn(BaseModel):
 class ScrapApprovalIn(BaseModel):
     part_id: int
     reason_code: str
-    approver_ids: list[int] = Field(..., min_length=3, max_length=3)
+    approver_ids: list[int] = Field(default_factory=list, max_length=3)
     attachment_ref: Optional[str] = None
     remark: Optional[str] = None
 
@@ -415,6 +428,7 @@ class ApprovalOut(BaseModel):
     reason_code: Optional[str] = None
     attachment_ref: Optional[str] = None
     remark: Optional[str] = None
+    auto_approved: bool = False
     steps: list[ApprovalStepOut] = []
     applicant: Optional[UserOut] = None
     dest_org: Optional[ExternalOrgOut] = None
@@ -504,6 +518,10 @@ class StocktakeListOut(BaseModel):
     initiated_at: datetime
     snapshot_at: datetime
     status: str
+    scope_value: Optional[dict] = None
+    initiator_name: Optional[str] = None
+    item_count: int = 0
+    summary: dict = {}
 
     model_config = {"from_attributes": True}
 
@@ -538,6 +556,7 @@ class SupplierOut(BaseModel):
     contact_info: Optional[str] = None
     remark: Optional[str] = None
     asset_category_ids: Optional[list[int]] = None
+    usage_count: int = 0
 
     model_config = {"from_attributes": True}
 

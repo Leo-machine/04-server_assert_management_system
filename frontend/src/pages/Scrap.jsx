@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { api } from '../api'
+import { api, getStoredUser } from '../api'
 import ApproverSelects, { useDefaultApprovers } from '../components/ApproverSelects'
 import { SCRAP_REASONS } from '../lib/categories'
+import { isSuperAdmin } from '../lib/roles'
 
 const REASON_CODES = SCRAP_REASONS
 
 export default function Scrap() {
   const { id } = useParams()
   const nav = useNavigate()
+  const superAdmin = isSuperAdmin(getStoredUser())
   const [part, setPart] = useState(null)
   const [users, setUsers] = useState([])
   const [approvers, setApprovers] = useDefaultApprovers(users)
@@ -32,7 +34,7 @@ export default function Scrap() {
     e.preventDefault()
     setError('')
     const ids = approvers.map(Number)
-    if (ids.some((n) => !n) || new Set(ids).size !== 3) {
+    if (!superAdmin && (ids.some((n) => !n) || new Set(ids).size !== 3)) {
       setError('请选择三位互不相同的审批人（须为领导）')
       return
     }
@@ -44,7 +46,7 @@ export default function Scrap() {
       await api.post('/approvals/scrap', {
         part_id: Number(id),
         reason_code: reasonCode,
-        approver_ids: ids,
+        approver_ids: superAdmin ? [] : ids,
         attachment_ref: attachmentRef || null,
         remark: remark || null,
       })
@@ -59,7 +61,7 @@ export default function Scrap() {
       <button type="button" className="back-link" onClick={() => nav('/')}>
         返回配件列表
       </button>
-      <h2>发起报废（三级审批）</h2>
+      <h2>{superAdmin ? '确认报废（超级管理员免审批）' : '发起报废（三级审批）'}</h2>
       {part && (
         <p className="muted">
           {part.fixed_asset_no} · 当前状态 {part.current_status}
@@ -69,9 +71,7 @@ export default function Scrap() {
             : ''}
         </p>
       )}
-      <p className="muted">
-        报废一律审批，通过后为终态不可恢复。申请人 = 当前操作人；三级审批人须为领导且互不相同。
-      </p>
+      {superAdmin ? <div className="super-admin-bypass"><strong>超级管理员直通</strong><span>提交后立即报废并写入操作履历；业务校验与高值件影像证据要求仍然生效。</span></div> : <p className="muted">报废一律审批，通过后为终态不可恢复。申请人 = 当前操作人；三级审批人须为领导且互不相同。</p>}
       {error && <div className="error">{error}</div>}
       <form onSubmit={onSubmit}>
         <label>
@@ -91,12 +91,12 @@ export default function Scrap() {
             required={needAttachment}
           />
         </label>
-        <ApproverSelects users={users} value={approvers} onChange={setApprovers} />
+        {!superAdmin && <ApproverSelects users={users} value={approvers} onChange={setApprovers} />}
         <label>
           备注（可选）
           <input value={remark} onChange={(e) => setRemark(e.target.value)} />
         </label>
-        <button type="submit">提交审批</button>
+        <button type="submit">{superAdmin ? '确认报废' : '提交审批'}</button>
       </form>
     </div>
   )

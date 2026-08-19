@@ -21,6 +21,17 @@ def test_allocatable_summary_seed_baseline(client):
     assert row["home_owner_unit"] == enums.HOME_OWNER_UNIT
 
 
+def test_allocatable_overview_is_backend_aggregated(client):
+    response = client.get("/api/inventory/allocatable-overview", headers=op_headers(1))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_assets"] >= body["in_stock"]
+    assert body["occupied"] == body["total_assets"] - body["in_stock"]
+    assert body["reserved"] == body["in_stock"] - body["allocatable"]
+    assert sum(body["by_category"].values()) == body["allocatable"]
+    assert body["home_owner_unit"] == enums.HOME_OWNER_UNIT
+
+
 def test_allocatable_cross_model_aggregation(client):
     """同规格不同品牌型号合并为一行。"""
     models = client.get("/api/part-models", headers=op_headers(1)).json()

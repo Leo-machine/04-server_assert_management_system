@@ -7,7 +7,7 @@ from .. import enums
 from ..database import get_db
 from ..deps import get_current_user, require_role
 from ..models import User
-from ..schemas import AllocatableSummaryItem
+from ..schemas import AllocatableOverviewOut, AllocatableSummaryItem
 from ..services import inventory as inventory_service
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -21,3 +21,12 @@ def allocatable_summary(
 ):
     require_role(current_user, enums.INVENTORY_ROLES)
     return inventory_service.allocatable_summary(db, category=category)
+
+
+@router.get("/allocatable-overview", response_model=AllocatableOverviewOut)
+def allocatable_overview(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_role(current_user, enums.INVENTORY_ROLES)
+    return inventory_service.allocatable_overview(db)

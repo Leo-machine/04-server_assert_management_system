@@ -30,6 +30,7 @@ export default function Login({ onLogin }) {
         username: data.username,
         name: data.name,
         role: data.role,
+        is_super_admin: data.is_super_admin,
       }
       setStoredUser(user)
       onLogin?.(user)

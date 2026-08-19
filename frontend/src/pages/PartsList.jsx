@@ -6,7 +6,7 @@ import BatchOpModal from '../components/BatchOpModal'
 import ListToolbar from '../components/ListToolbar'
 import { useSelection } from '../hooks/useSelection'
 import { filterByQuery } from '../lib/fuzzy'
-import { OPS_ROLES, hasRole, homePathFor } from '../lib/roles'
+import { MASTER_DATA_ROLES, OPS_ROLES, hasRole, homePathFor } from '../lib/roles'
 import { PART_CATEGORIES } from '../lib/categories'
 import { locLabel } from '../lib/locLabel'
 import Pagination from '../components/Pagination'
@@ -66,11 +66,12 @@ export default function PartsList() {
   const [batchBusy, setBatchBusy] = useState(false)
   const [query, setQuery] = useState('')
   const [openFilter, setOpenFilter] = useState('') // status | alloc | loc | ''
-  const [batchOp, setBatchOp] = useState(null) // install/loan/transfer/scrap/damage
+  const [batchOp, setBatchOp] = useState(null) // install/uninstall/loan/transfer/scrap/damage
   const [users, setUsers] = useState([])
   const me = getStoredUser()
   const canInstall = hasRole(me, OPS_ROLES)
   const canLoan = hasRole(me, OPS_ROLES)
+  const canDelete = hasRole(me, MASTER_DATA_ROLES)
   const canViewParts = hasRole(me, OPS_ROLES)
 
   function reload() {
@@ -262,6 +263,7 @@ export default function PartsList() {
   function eligibleFor(op) {
     const selected = visible.filter((p) => sel.isSelected(p.id))
     if (op === 'scrap') return selected.filter((p) => ['在库', '损坏'].includes(p.current_status))
+    if (op === 'uninstall') return selected.filter((p) => p.current_status === '在用')
     return selected.filter((p) => p.current_status === '在库')
   }
 
@@ -269,15 +271,35 @@ export default function PartsList() {
     setError('')
     const targets = eligibleFor(op)
     if (!targets.length) {
-      setError(op === 'scrap'
-        ? '所选配件中没有「在库/损坏」项，无法批量报废'
-        : '所选配件中没有「在库」项（装机/借出/调拨/报损仅在库可操作）')
+      setError(op === 'scrap' ? '所选配件中没有「在库/损坏」项，无法批量报废'
+        : op === 'uninstall' ? '所选配件中没有「在用」项，无法批量拆下'
+          : '所选配件中没有「在库」项（装机/借出/调拨/报损仅在库可操作）')
       return
     }
     if (!users.length) {
       api.get('/users').then(setUsers).catch(() => {})
     }
     setBatchOp(op)
+  }
+
+  async function batchDelete() {
+    const selected = visible.filter((part) => sel.isSelected(part.id))
+    const targets = selected.filter((part) => part.current_status === '在库')
+    if (!targets.length) {
+      setError('所选配件中没有可删除的「在库」记录')
+      return
+    }
+    if (!window.confirm(`确认尝试删除 ${targets.length} 件配件？\n仅未发生后续流转的误录数据会被删除；有审批、装机或业务履历的资产将跳过。`)) return
+    setBatchBusy(true); setError(''); setOk('')
+    let okN = 0
+    const errors = []
+    for (const part of targets) {
+      try { await api.delete(`/parts/${part.id}`); okN += 1 }
+      catch (err) { errors.push(`${part.fixed_asset_no}: ${err.message}`) }
+    }
+    await reload(); sel.clear(); setBatchBusy(false)
+    if (errors.length) setError(`批量删除：成功 ${okN} 件，跳过 ${errors.length} 件——${errors.slice(0, 3).join('；')}${errors.length > 3 ? ' 等' : ''}`)
+    else setOk(`批量删除：已删除 ${okN} 件误录配件`)
   }
 
   async function onBatchDone({ okN, errors, opTitle }) {
@@ -408,9 +430,10 @@ export default function PartsList() {
               <>
                 <span className="bt-group">
                   {canInstall && (
-                    <button type="button" className="bt-primary" disabled={batchBusy} onClick={() => openBatchOp('install')}>
-                      装机
-                    </button>
+                    <>
+                      <button type="button" className="bt-primary" disabled={batchBusy} onClick={() => openBatchOp('install')}>装机</button>
+                      <button type="button" disabled={batchBusy} onClick={() => openBatchOp('uninstall')}>拆下</button>
+                    </>
                   )}
                   {canLoan && (
                     <>
@@ -432,6 +455,12 @@ export default function PartsList() {
                     <button type="button" className="bt-danger" disabled={batchBusy} onClick={() => openBatchOp('scrap')}>
                       报废
                     </button>
+                  </>
+                )}
+                {canDelete && (
+                  <>
+                    <span className="bt-sep" />
+                    <button type="button" className="bt-danger" disabled={batchBusy} onClick={batchDelete}>删除</button>
                   </>
                 )}
               </>

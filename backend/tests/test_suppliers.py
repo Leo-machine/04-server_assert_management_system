@@ -43,6 +43,10 @@ def test_supplier_crud_and_rename_cascade(client):
     )
     assert inbound.status_code == 200
 
+    supplier_rows = client.get("/api/suppliers", headers=op_headers(1)).json()
+    supplier_row = next(row for row in supplier_rows if row["id"] == sid)
+    assert supplier_row["usage_count"] == 1
+
     r2 = client.put(
         f"/api/suppliers/{sid}",
         json={"name": "测试供应商B"},

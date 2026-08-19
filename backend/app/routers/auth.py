@@ -11,6 +11,7 @@ from ..database import get_db
 from ..deps import (
     get_current_user,
     hash_password,
+    is_super_admin,
     make_token,
     needs_password_upgrade,
     require_role,
@@ -32,6 +33,7 @@ class LoginOut(BaseModel):
     username: str
     name: str
     role: str
+    is_super_admin: bool = False
 
 
 class ChangePasswordIn(BaseModel):
@@ -79,6 +81,7 @@ def _user_out(user: User, token: str) -> dict:
         "username": user.username,
         "name": user.name,
         "role": user.role,
+        "is_super_admin": is_super_admin(user),
     }
 
 
@@ -115,6 +118,7 @@ def me(current_user: User = Depends(get_current_user)):
         "username": current_user.username,
         "name": current_user.name,
         "role": current_user.role,
+        "is_super_admin": is_super_admin(current_user),
     }
 
 
@@ -249,6 +253,7 @@ class UserAdminOut(BaseModel):
     applied_role: Optional[str] = None
     apply_reason: Optional[str] = None
     reject_reason: Optional[str] = None
+    is_super_admin: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -261,6 +266,8 @@ class UserCreateIn(BaseModel):
 
 
 class UserPatchIn(BaseModel):
+    name: Optional[str] = None
+    password: Optional[str] = None
     role: Optional[str] = None
     status: Optional[str] = None
 
@@ -331,7 +338,7 @@ def admin_patch_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """调整用户角色 / 停用启用。护栏：不能改自己；不能动最后一个在用的领导。"""
+    """编辑用户姓名、角色、状态或重置密码。护栏：不能改自己；不能动最后一个在用的领导。"""
     require_role(current_user, (enums.ROLE_LEADER,))
     user = db.get(User, user_id)
     if user is None:
@@ -341,10 +348,23 @@ def admin_patch_user(
 
     new_role = body.role if body.role is not None else user.role
     new_status = body.status if body.status is not None else user.status
+    if is_super_admin(user) and (
+        new_role != enums.ROLE_LEADER or new_status != enums.USER_STATUS_ACTIVE
+    ):
+        raise HTTPException(status_code=400, detail="超级管理员 admin 必须保持「领导 / 正常」状态")
     if new_role not in enums.ROLES:
         raise HTTPException(status_code=400, detail=f"非法角色「{new_role}」")
     if new_status not in (enums.USER_STATUS_ACTIVE, enums.USER_STATUS_DISABLED):
         raise HTTPException(status_code=400, detail="状态仅允许：正常 / 停用")
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="姓名必填")
+        user.name = name
+    if body.password is not None:
+        if len(body.password) < 6:
+            raise HTTPException(status_code=400, detail="重置密码至少 6 位")
+        user.password_hash = hash_password(body.password)
     # 最后一个领导保护
     if user.role == enums.ROLE_LEADER and (
         new_role != enums.ROLE_LEADER or new_status != enums.USER_STATUS_ACTIVE

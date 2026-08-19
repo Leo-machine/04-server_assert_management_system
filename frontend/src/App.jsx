@@ -110,6 +110,7 @@ export default function App() {
             name: me.name,
             username: me.username,
             role: me.role,
+            is_super_admin: me.is_super_admin,
           }
           setStoredUser(next)
           setUser(next)
