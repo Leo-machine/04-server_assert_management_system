@@ -71,9 +71,15 @@ def test_server_category_blocked_from_parts_inbound(client):
 
 
 def test_brand_huawei_applies_to_server(client):
-    """华为品牌适用类型应包含服务器（迁移回填）。"""
+    """服务器整机品牌通过二级“服务器类”范围管理，不混入三级类型。"""
+    tree = client.get("/api/asset-categories?tree=true", headers=op_headers(1)).json()
+    digital = next(item for item in tree if item["code"] == "DIGITAL")
+    server_scope = next(item for item in digital["children"] if item["code"] == "DIGITAL_SERVER")
     brands = client.get("/api/brands?category=服务器", headers=op_headers(1)).json()
-    names = {b["name"] for b in brands}
+    by_name = {b["name"]: b for b in brands}
+    names = set(by_name)
     assert "华为" in names
+    assert "服务器" not in (by_name["华为"]["categories"] or [])
+    assert server_scope["id"] in (by_name["华为"]["asset_category_ids"] or [])
     # 通用品牌（categories 为空）天然适用全部类型
     assert "戴尔" in names

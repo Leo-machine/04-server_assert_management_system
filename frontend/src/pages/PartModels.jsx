@@ -5,7 +5,7 @@ import ListToolbar from '../components/ListToolbar'
 import SpecFields, { formatSpec } from '../components/SpecFields'
 import { useSelection } from '../hooks/useSelection'
 import { filterByQuery } from '../lib/fuzzy'
-import { assetScopeLabel, level2Categories } from '../lib/assetScopes'
+import { assetScopeLabel, level2Categories, managedCategoriesForScopes } from '../lib/assetScopes'
 import Pagination from '../components/Pagination'
 import { usePagination } from '../hooks/usePagination'
 
@@ -56,6 +56,7 @@ export default function PartModels() {
   const [assetTree, setAssetTree] = useState([])
   const [scopeFilter, setScopeFilter] = useState('')
   const [domainFilter, setDomainFilter] = useState('')
+  const [showForm, setShowForm] = useState(false)
 
   const allScopes = useMemo(() => level2Categories(assetTree), [assetTree])
   const categories = useMemo(
@@ -70,14 +71,11 @@ export default function PartModels() {
   )
   const formScope = allScopes.find((item) => String(item.id) === String(form.asset_category_id))
   const formDomain = assetTree.find((root) => root.id === formScope?.domainId)
-  const typesForScopes = (scopes) => [...new Set(scopes.flatMap((scope) => [
-    ...(scope.code === 'DIGITAL_SERVER' ? ['服务器'] : []),
-    ...(scope.children || []).map((item) => item.business_category).filter(Boolean),
-  ]))]
+  const formTypeOptions = formScope ? managedCategoriesForScopes([formScope]) : []
   const scopeTypes = selectedScope
-    ? typesForScopes([selectedScope])
+    ? managedCategoriesForScopes([selectedScope])
     : domainFilter
-      ? typesForScopes(domainScopes)
+      ? managedCategoriesForScopes(domainScopes)
       : categories
 
   const schema = useMemo(
@@ -112,9 +110,11 @@ export default function PartModels() {
     const scopeId = Number(form.asset_category_id || 0)
     return brands.filter((b) => {
       const scopes = b.asset_category_ids || []
-      if (scopes.length && (!scopeId || !scopes.includes(scopeId))) return false
       const cats = b.categories || []
-      if (!cats.length) return true
+      const universal = !scopes.length && !cats.length
+      if (form.category === '服务器') return universal || (!!scopeId && scopes.includes(scopeId))
+      if (scopes.length && (!scopeId || !scopes.includes(scopeId))) return false
+      if (!cats.length) return universal
       return cats.includes(form.category)
     })
   }, [brands, form.category, form.asset_category_id])
@@ -156,22 +156,42 @@ export default function PartModels() {
     }
   }, [form.brand, form.spec, form.category, editingId])
 
-  function resetForm(cat) {
+  function resetForm(cat = '') {
     setEditingId(null)
     setForm({
       ...emptyForm,
-      category: cat || filterCat || categories[0] || '',
+      category: cat || '',
       spec: {},
-      asset_category_id: form.asset_category_id || '',
+      asset_category_id: '',
     })
+  }
+
+  function closeForm() {
+    setShowForm(false)
+    resetForm()
+  }
+
+  function openCreate() {
+    const scope = selectedScope || allScopes.find((item) => String(item.id) === String(scopeFilter)) || allScopes[0]
+    setEditingId(null)
+    if (scope) {
+      const availableTypes = managedCategoriesForScopes([scope])
+      const nextType = availableTypes.includes(filterCat) ? filterCat : availableTypes[0] || ''
+      setForm({ ...emptyForm, asset_category_id: String(scope.id), category: nextType, spec: {} })
+    } else {
+      setForm({ ...emptyForm, spec: {} })
+    }
+    setError('')
+    setOk('')
+    setShowForm(true)
   }
 
   function fillCreateForm(scope, preferredType = '') {
     if (!scope || editingId) return
-    const availableTypes = typesForScopes([scope])
+    const availableTypes = managedCategoriesForScopes([scope])
     const nextType = availableTypes.includes(preferredType)
       ? preferredType
-      : availableTypes[0] || categories[0] || ''
+      : availableTypes[0] || ''
     setForm((current) => ({
       ...(current.asset_category_id === String(scope.id) && current.category === nextType
         ? current
@@ -187,7 +207,6 @@ export default function PartModels() {
     setScopeFilter(firstScope ? String(firstScope.id) : '')
     setParams({})
     sel.clear()
-    if (firstScope) fillCreateForm({ ...firstScope, domainId: root.id, domain: root.name })
   }
 
   function chooseScope(scope) {
@@ -195,16 +214,10 @@ export default function PartModels() {
     setDomainFilter(String(scope.domainId || activeDomain?.id || ''))
     setParams({})
     sel.clear()
-    fillCreateForm(scope)
   }
 
   function chooseType(cat) {
     setParams({ category: cat })
-    if (!editingId) {
-      const scope = selectedScope || allScopes.find((item) => String(item.id) === String(form.asset_category_id))
-      if (scope) fillCreateForm(scope, cat)
-      else setForm((current) => ({ ...current, category: cat, brand: '', spec: {} }))
-    }
   }
 
   function onSpecChange(key, value) {
@@ -224,6 +237,7 @@ export default function PartModels() {
     setParams({ category: m.category })
     setError('')
     setOk('')
+    setShowForm(true)
   }
 
   async function onSubmit(e) {
@@ -253,7 +267,7 @@ export default function PartModels() {
       }
       setParams(savedCat ? { category: savedCat } : {})
       await load()
-      resetForm(savedCat)
+      closeForm()
     } catch (err) {
       setError(err.message)
     }
@@ -266,7 +280,7 @@ export default function PartModels() {
     try {
       await api.delete(`/part-models/${m.id}`)
       setOk(`已删除型号 #${m.id}`)
-      if (editingId === m.id) resetForm(m.category)
+      if (editingId === m.id) closeForm()
       await load()
       sel.clear()
     } catch (err) {
@@ -302,7 +316,7 @@ export default function PartModels() {
     <div className="panel">
       <div className="model-page-head">
         <div><h2>型号管理</h2><p className="muted">沿资产目录逐级定位型号，统一维护品牌、料号和规格参数。</p></div>
-        <div className="model-stats"><span><strong>{models.length}</strong>型号总数</span><span><strong>{brands.length}</strong>品牌</span><span><strong>{allScopes.length}</strong>设备类别</span></div>
+        <div className="model-page-actions"><div className="model-stats"><span><strong>{models.length}</strong>型号总数</span><span><strong>{brands.length}</strong>品牌</span><span><strong>{allScopes.length}</strong>设备类别</span></div><button type="button" className="model-add-button" onClick={openCreate}>+ 新增型号</button></div>
       </div>
       {error && <div className="error">{error}</div>}
       {ok && <div className="ok-msg">{ok}</div>}
@@ -313,7 +327,7 @@ export default function PartModels() {
           <button type="button" className={!domainFilter ? 'is-active' : ''} onClick={() => { setDomainFilter(''); setScopeFilter(''); setParams({}); sel.clear() }}>全部专业</button>
           {assetTree.filter((root) => root.enabled).map((root) => <button key={root.id} type="button" className={domainFilter === String(root.id) ? 'is-active' : ''} onClick={() => chooseDomain(root)}>{root.name}<small>{(root.children || []).filter((item) => item.enabled).length}</small></button>)}
         </div>
-        <div className="model-browser-step"><span>02</span><strong>选择设备类别</strong></div>
+        <div className="model-browser-step"><span>02</span><strong>设备整机类别（二级目录）</strong></div>
         <div className="model-scope-grid">
           {(domainFilter ? domainScopes : allScopes).map((item) => {
             const count = models.filter((model) => model.asset_category_id === item.id).length
@@ -321,106 +335,16 @@ export default function PartModels() {
           })}
           {!(domainFilter ? domainScopes : allScopes).length && <p className="muted">该专业暂无二级设备类别</p>}
         </div>
-        <div className="model-browser-step"><span>03</span><strong>具体型号类型</strong></div>
+        <div className="model-browser-step"><span>03</span><strong>型号对象：设备整机或三级具体类型</strong></div>
         <div className="model-type-row">
           <button type="button" className={!filterCat ? 'is-active' : ''} onClick={() => setParams({})}>全部类型</button>
-          {scopeTypes.map((cat) => <button key={cat} type="button" className={filterCat === cat ? 'is-active' : ''} onClick={() => chooseType(cat)}>{cat}<small>{models.filter((m) => (!scopeFilter || String(m.asset_category_id) === scopeFilter) && m.category === cat).length}</small></button>)}
-          {!scopeTypes.length && <span className="model-types-empty">该目录尚未配置具体型号类型</span>}
+          {scopeTypes.map((cat) => <button key={cat} type="button" className={filterCat === cat ? 'is-active' : ''} onClick={() => chooseType(cat)}>{cat === '服务器' ? '设备整机' : cat}<small>{models.filter((m) => (!scopeFilter || String(m.asset_category_id) === scopeFilter) && m.category === cat).length}</small></button>)}
+          {!scopeTypes.length && <span className="model-types-empty">该设备类别的整机型号与三级类型能力尚未接入</span>}
         </div>
       </div>
 
-      <div className="split-layout model-workspace">
-        <form className="inbound-form" onSubmit={onSubmit}>
-          <fieldset>
-            <legend>{editingId ? `编辑型号 #${editingId}` : '新增型号'}</legend>
-            <div className="model-form-path"><span>{formDomain?.name || '请选择专业'}</span><i>›</i><strong>{formScope?.name || '请选择设备类别'}</strong></div>
-            <label>所属专业 *
-              <select value={formDomain?.id || ''} onChange={(e) => { const root = assetTree.find((item) => String(item.id) === e.target.value); const first = (root?.children || []).find((item) => item.enabled); if (first) fillCreateForm({...first, domainId: root.id, domain: root.name}); else setForm({...form, asset_category_id: '', brand: ''}) }} required>
-                <option value="">— 请选择专业 —</option>{assetTree.filter((root) => root.enabled).map((root) => <option key={root.id} value={root.id}>{root.name}</option>)}
-              </select>
-            </label>
-            <label>设备类别 *
-              <select value={form.asset_category_id} onChange={(e) => { const scope = allScopes.find((item) => String(item.id) === e.target.value); if (scope) fillCreateForm(scope) }} required>
-                <option value="">— 请选择二级类别 —</option>{(formDomain?.children || []).filter((item) => item.enabled).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </label>
-            <label>
-              配件类型 *
-              <select
-                value={form.category}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    category: e.target.value,
-                    brand: '',
-                    spec: {},
-                  })
-                }
-                required
-                disabled={!!editingId}
-              >
-                {categories.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              型号名称 *
-              <input
-                value={form.model_name}
-                onChange={(e) => setForm({ ...form, model_name: e.target.value })}
-                required
-                placeholder="自动拼接，可手动修改"
-              />
-              <span className="muted" style={{ fontSize: '0.75rem' }}>
-                {editingId ? '手动输入' : '根据品牌 + 规格自动拼接，可覆盖'}
-              </span>
-            </label>
-            <label>
-              品牌
-              <select
-                value={form.brand}
-                onChange={(e) => setForm({ ...form, brand: e.target.value })}
-              >
-                <option value="">— 请选择品牌 —</option>
-                {categoryBrands.map((b) => (
-                  <option key={b.id} value={b.name}>{b.name}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              厂商料号 PN
-              <input
-                value={form.pn}
-                onChange={(e) => setForm({ ...form, pn: e.target.value })}
-                placeholder="型号料号（非实物 SN）"
-              />
-            </label>
-          </fieldset>
-
-          <fieldset>
-            <legend>{form.category || '规格'}字段</legend>
-            <SpecFields
-              fields={schema?.fields || []}
-              values={form.spec}
-              onChange={onSpecChange}
-            />
-          </fieldset>
-
-          <div className="row-actions">
-            <button type="submit">{editingId ? '保存修改' : '新增型号'}</button>
-            {editingId && (
-              <button type="button" className="secondary" onClick={() => resetForm(form.category)}>
-                取消编辑
-              </button>
-            )}
-          </div>
-        </form>
-
-        <div>
-          <h3 style={{ marginTop: 0 }}>
-            {filterCat ? `${filterCat} · ` : ''}型号列表
-          </h3>
+      <section className="model-list-card">
+        <div className="model-list-heading"><div><span>型号目录</span><h3>{filterCat ? `${filterCat === '服务器' ? '设备整机' : filterCat} · 型号列表` : '全部型号'}</h3></div><p>设备整机归属二级目录，配件型号归属对应三级类型</p></div>
           <ListToolbar
             query={query}
             onQueryChange={(q) => {
@@ -446,7 +370,7 @@ export default function PartModels() {
               </button>
             }
           />
-          <table>
+          <div className="model-table-wrap"><table>
             <thead>
               <tr>
                 <th className="lt-check-col">
@@ -461,7 +385,7 @@ export default function PartModels() {
                   />
                 </th>
                 <th>资产专业 / 类别</th>
-                <th>具体类型</th>
+                <th>型号对象</th>
                 <th>型号</th>
                 <th>规格</th>
                 <th>操作</th>
@@ -479,7 +403,7 @@ export default function PartModels() {
                     />
                   </td>
                   <td className="muted">{assetScopeLabel(m.asset_category_id ? [m.asset_category_id] : [], assetTree)}</td>
-                  <td><span className="badge">{m.category}</span></td>
+                  <td><span className={`badge ${m.category === '服务器' ? 'is-device-model' : ''}`}>{m.category === '服务器' ? '设备整机' : m.category}</span></td>
                   <td>
                     <div>{m.model_name}</div>
                     <div className="muted">
@@ -509,11 +433,58 @@ export default function PartModels() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
           <Pagination pagination={pagination} />
-          {!visible.length && <p className="muted">暂无型号，请在左侧新增或调整搜索。</p>}
+          {!visible.length && <div className="model-empty-state"><span>◇</span><strong>暂无匹配型号</strong><p>调整目录筛选，或点击右上角新增型号。</p></div>}
+      </section>
+
+      {showForm && (
+        <div className="model-modal-overlay" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) closeForm() }}>
+          <form className="model-modal" onSubmit={onSubmit}>
+            <div className="model-modal-head"><div><span>{editingId ? '编辑型号' : '新增型号'}</span><h3>{editingId ? `修改型号 #${editingId}` : '建立型号档案'}</h3></div><button type="button" className="model-modal-close" onClick={closeForm} aria-label="关闭">×</button></div>
+            <div className="model-modal-body">
+              <section className="model-form-section">
+                <div className="model-form-section-title"><span>01</span><div><strong>型号归属</strong><small>二级目录定位设备整机，三级类型定位配件型号</small></div></div>
+                <div className="model-form-path"><span>{formDomain?.name || '请选择专业'}</span><i>›</i><strong>{formScope?.name || '请选择设备类别'}</strong><i>›</i><b>{form.category === '服务器' ? '设备整机' : form.category || '请选择型号对象'}</b></div>
+                <div className="model-form-grid">
+                  <label>所属专业 *
+                    <select value={formDomain?.id || ''} disabled={!!editingId} onChange={(e) => { const root = assetTree.find((item) => String(item.id) === e.target.value); const first = (root?.children || []).find((item) => item.enabled); if (first) fillCreateForm({ ...first, domainId: root.id, domain: root.name }); else setForm({ ...emptyForm, spec: {} }) }} required>
+                      <option value="">— 请选择专业 —</option>{assetTree.filter((root) => root.enabled).map((root) => <option key={root.id} value={root.id}>{root.name}</option>)}
+                    </select>
+                  </label>
+                  <label>设备整机类别 *
+                    <select value={form.asset_category_id} disabled={!!editingId} onChange={(e) => { const scope = allScopes.find((item) => String(item.id) === e.target.value); if (scope) fillCreateForm(scope) }} required>
+                      <option value="">— 请选择二级类别 —</option>{(formDomain?.children || []).filter((item) => item.enabled).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                    </select>
+                  </label>
+                  <label>型号对象 *
+                    <select value={form.category} disabled={!!editingId || !formTypeOptions.length} onChange={(e) => setForm({ ...form, category: e.target.value, brand: '', spec: {} })} required>
+                      {!formTypeOptions.length && <option value="">该类别型号能力待接入</option>}
+                      {formTypeOptions.map((category) => <option key={category} value={category}>{category === '服务器' ? `设备整机（${formScope?.name || '二级目录'}）` : category}</option>)}
+                    </select>
+                  </label>
+                </div>
+                {!formTypeOptions.length && <p className="model-form-warning">当前二级设备类别尚未配置整机型号规格或三级业务类型，暂不能新增型号。</p>}
+              </section>
+
+              <section className="model-form-section">
+                <div className="model-form-section-title"><span>02</span><div><strong>型号基本信息</strong><small>品牌自动按当前设备类别与具体类型联动筛选</small></div></div>
+                <div className="model-form-grid">
+                  <label>品牌<select value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })}><option value="">— 请选择品牌 —</option>{categoryBrands.map((brand) => <option key={brand.id} value={brand.name}>{brand.name}</option>)}</select></label>
+                  <label>厂商料号 PN<input value={form.pn} onChange={(e) => setForm({ ...form, pn: e.target.value })} placeholder="型号料号（非实物 SN）" /></label>
+                  <label className="model-name-field">型号名称 *<input value={form.model_name} onChange={(e) => setForm({ ...form, model_name: e.target.value })} required placeholder="根据品牌和规格自动拼接，可手动修改" /><small>{editingId ? '编辑模式下保留原型号名称' : '选择品牌并填写规格后自动生成，仍可覆盖修改'}</small></label>
+                </div>
+              </section>
+
+              <section className="model-form-section">
+                <div className="model-form-section-title"><span>03</span><div><strong>{form.category === '服务器' ? '设备整机' : form.category || '型号'}规格参数</strong><small>规格字段由型号对象统一定义并由后端校验</small></div></div>
+                <div className="model-spec-fields"><SpecFields fields={schema?.fields || []} values={form.spec} onChange={onSpecChange} /></div>
+              </section>
+            </div>
+            <div className="model-modal-actions"><button type="button" className="secondary" onClick={closeForm}>取消</button><button type="submit" disabled={!form.asset_category_id || !form.category}>{editingId ? '保存修改' : '创建型号'}</button></div>
+          </form>
         </div>
-      </div>
+      )}
     </div>
   )
 }

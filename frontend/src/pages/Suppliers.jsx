@@ -6,7 +6,7 @@ import AssetScopePicker from '../components/AssetScopePicker'
 import { useSelection } from '../hooks/useSelection'
 import { usePagination } from '../hooks/usePagination'
 import { filterByQuery } from '../lib/fuzzy'
-import { assetScopeLabel, level2Categories } from '../lib/assetScopes'
+import { assetScopeLabel, level2Categories, level2CategoriesForDomain } from '../lib/assetScopes'
 
 const emptyForm = { name: '', contact: '', contact_info: '', remark: '', asset_category_ids: [] }
 
@@ -30,7 +30,7 @@ export default function Suppliers() {
   useEffect(() => { load().catch((e) => setError(e.message)) }, [])
 
   const allScopes = useMemo(() => level2Categories(assetTree), [assetTree])
-  const domainScopes = useMemo(() => domainFilter ? allScopes.filter((item) => String(item.parentId) === String(domainFilter)) : allScopes, [allScopes, domainFilter])
+  const domainScopes = useMemo(() => level2CategoriesForDomain(assetTree, domainFilter), [assetTree, domainFilter])
   const activeDomain = assetTree.find((root) => String(root.id) === String(domainFilter))
   const selectedScope = allScopes.find((item) => String(item.id) === String(scopeFilter))
   const visible = useMemo(() => {
@@ -102,7 +102,7 @@ export default function Suppliers() {
 
       <section className="supplier-catalog-browser">
         <div className="supplier-filter-row"><div className="supplier-filter-label"><span>01</span><strong>选择资产专业</strong></div><div className="supplier-domain-tabs"><button type="button" className={!domainFilter ? 'active' : ''} onClick={() => chooseDomain('')}>全部专业</button>{assetTree.map((root) => <button key={root.id} type="button" className={String(domainFilter) === String(root.id) ? 'active' : ''} onClick={() => chooseDomain(String(root.id))}>{root.name}</button>)}</div></div>
-        <div className="supplier-filter-row is-last"><div className="supplier-filter-label"><span>02</span><strong>选择设备类别</strong></div><div className="supplier-scope-grid"><button type="button" className={!scopeFilter ? 'active' : ''} onClick={() => { setScopeFilter(''); sel.clear() }}><span>全</span><p><strong>全部类别</strong><small>{activeDomain?.name || '所有专业'}</small></p></button>{domainScopes.map((scope) => <button key={scope.id} type="button" className={String(scopeFilter) === String(scope.id) ? 'active' : ''} onClick={() => { setDomainFilter(String(scope.parentId)); setScopeFilter(String(scope.id)); sel.clear() }}><span>{scope.name.slice(0, 1)}</span><p><strong>{scope.name}</strong><small>{scope.domain}</small></p></button>)}</div></div>
+        <div className="supplier-filter-row is-last"><div className="supplier-filter-label"><span>02</span><strong>选择设备类别</strong></div><div className="supplier-scope-grid"><button type="button" className={!scopeFilter ? 'active' : ''} onClick={() => { setScopeFilter(''); sel.clear() }}><span>全</span><p><strong>全部类别</strong><small>{activeDomain?.name || '所有专业'}</small></p></button>{domainScopes.map((scope) => <button key={scope.id} type="button" className={String(scopeFilter) === String(scope.id) ? 'active' : ''} onClick={() => { setDomainFilter(String(scope.domainId)); setScopeFilter(String(scope.id)); sel.clear() }}><span>{scope.name.slice(0, 1)}</span><p><strong>{scope.name}</strong><small>{scope.domain}</small></p></button>)}</div></div>
       </section>
 
       <section className="supplier-list-card"><div className="supplier-section-head"><div><span>供应商目录</span><h3>{listTitle}</h3></div><p>通用供应商会自动出现在各适用目录</p></div>

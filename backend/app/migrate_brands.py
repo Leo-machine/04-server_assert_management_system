@@ -24,6 +24,7 @@ DEFAULT_BRAND_CATEGORIES: dict[str, list[str]] = {
     "Intel": ["网卡", "算力卡"],
     "Broadcom": ["RAID卡", "HBA卡", "网卡"],
     "Mellanox": ["网卡"],
+    # “服务器”旧标记会由 migrate_catalog_scopes 迁移到二级“服务器类”范围。
     "华为": ["网卡", "光模块", "服务器"],
     "H3C": ["网卡", "光模块", "服务器"],
     "戴尔": [],
@@ -34,10 +35,7 @@ DEFAULT_BRAND_CATEGORIES: dict[str, list[str]] = {
 }
 
 # 老库追加回填：品牌后续新增适用类型时并入已有列表（幂等）
-_BRAND_CATEGORY_APPEND: dict[str, list[str]] = {
-    "华为": ["服务器"],
-    "H3C": ["服务器"],
-}
+_BRAND_CATEGORY_APPEND: dict[str, list[str]] = {}
 
 
 def _table_columns(db: Session, table: str) -> set[str]:

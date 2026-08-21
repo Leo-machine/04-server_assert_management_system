@@ -59,6 +59,21 @@ def test_invalid_category_rejected(client):
     assert r.status_code == 400
 
 
+def test_scoped_device_brand_is_not_treated_as_all_part_types(client):
+    tree = client.get("/api/asset-categories?tree=true", headers=op_headers(1)).json()
+    digital = next(item for item in tree if item["code"] == "DIGITAL")
+    switch = next(item for item in digital["children"] if item["code"] == "DIGITAL_SWITCH")
+    created = client.post(
+        "/api/brands",
+        json={"name": "交换机整机品牌", "asset_category_ids": [switch["id"]]},
+        headers=op_headers(1),
+    )
+    assert created.status_code == 200, created.text
+
+    memory = client.get("/api/brands", params={"category": "内存"}, headers=op_headers(1)).json()
+    assert all(brand["name"] != "交换机整机品牌" for brand in memory)
+
+
 def test_migrate_brands_backfills_when_users_exist_but_brand_empty(db_session):
     """升级场景：有用户、品牌表被清空后，migrate_brands 应回填默认名录。"""
     from sqlalchemy import delete, select

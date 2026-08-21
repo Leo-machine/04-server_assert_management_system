@@ -3,8 +3,8 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..category_specs import ALL_MANAGED_CATEGORIES
-from ..models import Brand, PartModel
+from ..category_specs import ALL_MANAGED_CATEGORIES, PART_CATEGORIES, SERVER_CATEGORY
+from ..models import AssetCategory, Brand, PartModel
 from .movement import BusinessError
 from .asset_categories import normalize_level2_ids
 
@@ -18,9 +18,9 @@ def _normalize_categories(categories: Optional[list[str]]) -> Optional[list[str]
         cat = (raw or "").strip()
         if not cat:
             continue
-        if cat not in ALL_MANAGED_CATEGORIES:
+        if cat not in PART_CATEGORIES:
             raise BusinessError(
-                f"非法配件类型「{cat}」，允许：{' / '.join(ALL_MANAGED_CATEGORIES)}"
+                f"非法三级类型「{cat}」，允许：{' / '.join(PART_CATEGORIES)}"
             )
         if cat not in seen:
             cleaned.append(cat)
@@ -28,11 +28,20 @@ def _normalize_categories(categories: Optional[list[str]]) -> Optional[list[str]
     return cleaned or None
 
 
-def brand_matches_category(brand: Brand, category: str) -> bool:
-    """未标注类型 = 通用（各类型可选）；有标注则须包含该类型。"""
+def brand_matches_category(
+    brand: Brand, category: str, *, device_scope_id: Optional[int] = None
+) -> bool:
+    """二级范围管理设备品牌，三级类型管理配件品牌。"""
     cats = brand.categories or []
+    scopes = brand.asset_category_ids or []
+    if category == SERVER_CATEGORY:
+        # 全局通用品牌，或明确归属服务器类的设备品牌。
+        return (not cats and not scopes) or (
+            device_scope_id is not None and device_scope_id in scopes
+        )
     if not cats:
-        return True
+        # 有二级范围但无三级类型时，表示仅作为设备整机品牌。
+        return not scopes
     return category in cats
 
 
@@ -44,7 +53,19 @@ def list_brands(db: Session, *, category: Optional[str] = None) -> list[Brand]:
         raise BusinessError(
             f"非法配件类型「{category}」，允许：{' / '.join(ALL_MANAGED_CATEGORIES)}"
         )
-    return [b for b in rows if brand_matches_category(b, category)]
+    device_scope_id = None
+    if category == SERVER_CATEGORY:
+        device_scope_id = db.scalars(
+            select(AssetCategory.id).where(
+                AssetCategory.level == 2,
+                AssetCategory.code == "DIGITAL_SERVER",
+            )
+        ).first()
+    return [
+        b
+        for b in rows
+        if brand_matches_category(b, category, device_scope_id=device_scope_id)
+    ]
 
 
 def _brand_in_use(db: Session, brand_name: str) -> bool:
